@@ -3,14 +3,18 @@
 A self-contained VLC-based video player control for Avalonia UI with **embedded VLC libraries**.
 
 [![NuGet](https://img.shields.io/nuget/v/VlcVideoPlayer.Avalonia.svg)](https://www.nuget.org/packages/VlcVideoPlayer.Avalonia/)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+![Video Player Screenshot](https://raw.githubusercontent.com/jojomondag/Avalonia.VlcVideoPlayer/main/screenshot.png)
 
 ## Features
 
 - 🎬 Full-featured video player control for Avalonia
-- 📦 **VLC libraries included** - no manual installation required!
-- 🎨 Built-in playback controls with Material Icons
+- 📦 **VLC libraries included automatically** - no manual VLC installation required!
+- 🎨 Clean, modern UI with Material Design icons
 - 🖥️ Cross-platform (Windows, macOS, Linux)
 - ⚡ Based on LibVLCSharp for maximum codec support
+- 🎛️ Built-in controls: Play/Pause, Stop, Seek bar, Volume slider, Mute
 
 ## Installation
 
@@ -18,16 +22,103 @@ A self-contained VLC-based video player control for Avalonia UI with **embedded 
 dotnet add package VlcVideoPlayer.Avalonia
 ```
 
-The package includes the official VideoLAN LibVLC libraries for Windows. For other platforms, see [Platform Support](#platform-support).
+That's it! The VLC native libraries for Windows are automatically included as a transitive dependency. For other platforms, see [Platform Support](#platform-support).
 
 ## Quick Start
 
-### 1. Add Material Icons to App.axaml
+### Step 1: Add Material Icons to App.axaml
+
+**Important:** The video player uses Material Icons for its controls. You must add the `MaterialIconStyles` to your `App.axaml`:
 
 ```xml
 <Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:materialIcons="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
-             ...>
+             x:Class="YourApp.App">
+    <Application.Styles>
+        <FluentTheme />
+        <!-- Required for video player icons -->
+        <materialIcons:MaterialIconStyles />
+    </Application.Styles>
+</Application>
+```
+
+### Step 2: Initialize VLC at Startup
+
+In your `Program.cs` or `App.axaml.cs`, initialize VLC before creating any windows:
+
+```csharp
+using Avalonia.VlcVideoPlayer;
+
+public class Program
+{
+    public static void Main(string[] args)
+    {
+        // Initialize VLC - must be called before creating windows
+        VlcInitializer.Initialize();
+        
+        BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+    }
+
+    public static AppBuilder BuildAvaloniaApp()
+        => AppBuilder.Configure<App>()
+            .UsePlatformDetect()
+            .WithInterFont()
+            .LogToTrace();
+}
+```
+
+### Step 3: Add the VideoPlayerControl to your Window
+
+```xml
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vlc="clr-namespace:Avalonia.VlcVideoPlayer;assembly=Avalonia.VlcVideoPlayer"
+        Title="My Video Player" Width="800" Height="600">
+    
+    <vlc:VideoPlayerControl x:Name="VideoPlayer" />
+    
+</Window>
+```
+
+### Step 4: Play a Video
+
+Use the built-in "Open" button, or load programmatically:
+
+```csharp
+// Play a local file
+VideoPlayer.Open(@"C:\Videos\movie.mp4");
+
+// Or play from URL
+VideoPlayer.OpenUri(new Uri("https://example.com/video.mp4"));
+```
+
+## Complete Example
+
+Here's a minimal working example:
+
+**MyApp.csproj:**
+```xml
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.6" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.6" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.6" />
+    <PackageReference Include="VlcVideoPlayer.Avalonia" Version="1.3.0" />
+  </ItemGroup>
+</Project>
+```
+
+**App.axaml:**
+```xml
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:materialIcons="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
+             x:Class="MyApp.App">
     <Application.Styles>
         <FluentTheme />
         <materialIcons:MaterialIconStyles />
@@ -35,31 +126,26 @@ The package includes the official VideoLAN LibVLC libraries for Windows. For oth
 </Application>
 ```
 
-### 2. Initialize VLC (Program.cs or App startup)
-
+**Program.cs:**
 ```csharp
+using Avalonia;
 using Avalonia.VlcVideoPlayer;
 
-// Call before creating any windows
-VlcInitializer.Initialize();
-```
+namespace MyApp;
 
-### 3. Add the VideoPlayerControl to your XAML
+class Program
+{
+    public static void Main(string[] args)
+    {
+        VlcInitializer.Initialize();
+        BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+    }
 
-```xml
-<Window xmlns:vlc="clr-namespace:Avalonia.VlcVideoPlayer;assembly=Avalonia.VlcVideoPlayer">
-    <vlc:VideoPlayerControl x:Name="VideoPlayer" ShowControls="True" />
-</Window>
-```
-
-### 4. Play a video
-
-```csharp
-// Play a local file
-VideoPlayer.Open("/path/to/video.mp4");
-
-// Or play from URL
-VideoPlayer.OpenUri(new Uri("https://example.com/video.mp4"));
+    public static AppBuilder BuildAvaloniaApp()
+        => AppBuilder.Configure<App>()
+            .UsePlatformDetect()
+            .LogToTrace();
+}
 ```
 
 ## Platform Support
