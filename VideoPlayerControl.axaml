@@ -1,0 +1,80 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vlc="clr-namespace:LibVLCSharp.Avalonia;assembly=LibVLCSharp.Avalonia"
+             xmlns:mi="using:Material.Icons.Avalonia"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="500"
+             x:Class="Avalonia.VlcVideoPlayer.VideoPlayerControl">
+    
+    <Grid RowDefinitions="*,Auto">
+        <!-- Video View -->
+        <Border Grid.Row="0" Background="Black">
+            <vlc:VideoView Name="VideoView" />
+        </Border>
+        
+        <!-- Controls Panel -->
+        <Border Grid.Row="1" Background="#2d2d2d" Padding="10">
+            <Grid RowDefinitions="Auto,Auto">
+                <!-- Seek Bar -->
+                <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,8">
+                    <TextBlock Name="CurrentTimeText" Grid.Column="0" 
+                               Text="00:00" Foreground="White" 
+                               VerticalAlignment="Center" Margin="0,0,10,0" FontSize="12"/>
+                    <Slider Name="SeekBar" Grid.Column="1" 
+                            Minimum="0" Maximum="100" Value="0"
+                            VerticalAlignment="Center"/>
+                    <TextBlock Name="TotalTimeText" Grid.Column="2" 
+                               Text="00:00" Foreground="White" 
+                               VerticalAlignment="Center" Margin="10,0,0,0" FontSize="12"/>
+                </Grid>
+                
+                <!-- Playback Controls -->
+                <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto">
+                    <!-- Open File Button -->
+                    <Button Name="OpenButton" Grid.Column="0" Margin="0,0,5,0"
+                            Click="OnOpenClick">
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                            <mi:MaterialIcon Kind="FolderOpen" Width="20" Height="20"/>
+                            <TextBlock Text="Open" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    
+                    <!-- Play/Pause Button -->
+                    <Button Name="PlayPauseButton" Grid.Column="1" Width="90" Margin="0,0,5,0"
+                            Click="OnPlayPauseClick">
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                            <mi:MaterialIcon Name="PlayPauseIcon" Kind="Play" Width="20" Height="20"/>
+                            <TextBlock Name="PlayPauseText" Text="Play" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    
+                    <!-- Stop Button -->
+                    <Button Name="StopButton" Grid.Column="2" Margin="0,0,5,0"
+                            Click="OnStopClick">
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                            <mi:MaterialIcon Kind="Stop" Width="20" Height="20"/>
+                            <TextBlock Text="Stop" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    
+                    <!-- Mute Button -->
+                    <Button Name="MuteButton" Grid.Column="3" Width="40" Margin="0,0,5,0"
+                            Click="OnMuteClick">
+                        <mi:MaterialIcon Name="VolumeIcon" Kind="VolumeHigh" Width="20" Height="20"/>
+                    </Button>
+                    
+                    <!-- Spacer -->
+                    <Panel Grid.Column="4"/>
+                    
+                    <!-- Volume Slider -->
+                    <mi:MaterialIcon Grid.Column="5" Kind="VolumeHigh" Width="18" Height="18"
+                                     VerticalAlignment="Center" Margin="0,0,5,0" Opacity="0.7"/>
+                    <Slider Name="VolumeSlider" Grid.Column="6" 
+                            Width="100" Minimum="0" Maximum="100" Value="100"
+                            VerticalAlignment="Center"/>
+                </Grid>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>
