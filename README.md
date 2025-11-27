@@ -108,7 +108,7 @@ Here's a minimal working example:
     <PackageReference Include="Avalonia" Version="11.3.6" />
     <PackageReference Include="Avalonia.Desktop" Version="11.3.6" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.6" />
-    <PackageReference Include="VlcVideoPlayer.Avalonia" Version="1.3.0" />
+    <PackageReference Include="VlcVideoPlayer.Avalonia" Version="1.4.0" />
   </ItemGroup>
 </Project>
 ```
@@ -148,6 +148,46 @@ class Program
 }
 ```
 
+## Embedded Player (No Open Button)
+
+For scenarios where you want to play a specific video without the file browser, use the `Source` property and hide the Open button:
+
+```xml
+<!-- XAML: Embedded player with custom background -->
+<vlc:VideoPlayerControl 
+    Source="C:\Videos\intro.mp4"
+    AutoPlay="True"
+    ShowOpenButton="False"
+    ControlPanelBackground="#2d2d2d" />
+```
+
+Or set programmatically:
+
+```csharp
+// Hide the Open button and set source
+VideoPlayer.ShowOpenButton = false;
+VideoPlayer.AutoPlay = true;
+VideoPlayer.Source = @"C:\Videos\movie.mp4";
+
+// Customize the control panel background
+VideoPlayer.ControlPanelBackground = new SolidColorBrush(Color.Parse("#1a1a1a"));
+```
+
+### Custom Control Panel Colors
+
+The control panel background can be customized to match your app's theme:
+
+```xml
+<!-- Dark theme -->
+<vlc:VideoPlayerControl ControlPanelBackground="#1a1a1a" />
+
+<!-- Match your app's accent color -->
+<vlc:VideoPlayerControl ControlPanelBackground="{DynamicResource SystemAccentColor}" />
+
+<!-- Transparent (overlay style) -->
+<vlc:VideoPlayerControl ControlPanelBackground="Transparent" />
+```
+
 ## Platform Support
 
 | Platform | VLC Libraries |
@@ -180,6 +220,9 @@ For cross-platform applications, add the appropriate LibVLC packages:
 | `Volume` | `int` | Volume level (0-100) |
 | `AutoPlay` | `bool` | Auto-play when media is loaded |
 | `ShowControls` | `bool` | Show/hide playback controls |
+| `ShowOpenButton` | `bool` | Show/hide the Open button (default: true) |
+| `Source` | `string` | Video source path - set to auto-load video |
+| `ControlPanelBackground` | `IBrush` | Background color of the control panel (default: White) |
 | `IsPlaying` | `bool` | Whether media is currently playing |
 | `Position` | `double` | Current playback position (0.0-1.0) |
 | `Duration` | `TimeSpan` | Total media duration |

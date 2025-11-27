@@ -32,6 +32,8 @@ public partial class VideoPlayerControl : UserControl
     private bool _isMuted;
     private int _previousVolume = 100;
     private bool _isInitialized;
+    private Border? _controlPanelBorder;
+    private Button? _openButton;
 
     /// <summary>
     /// Defines the Volume property.
@@ -50,6 +52,24 @@ public partial class VideoPlayerControl : UserControl
     /// </summary>
     public static readonly StyledProperty<bool> ShowControlsProperty =
         AvaloniaProperty.Register<VideoPlayerControl, bool>(nameof(ShowControls), true);
+
+    /// <summary>
+    /// Defines the ShowOpenButton property.
+    /// </summary>
+    public static readonly StyledProperty<bool> ShowOpenButtonProperty =
+        AvaloniaProperty.Register<VideoPlayerControl, bool>(nameof(ShowOpenButton), true);
+
+    /// <summary>
+    /// Defines the Source property for setting video path directly.
+    /// </summary>
+    public static readonly StyledProperty<string?> SourceProperty =
+        AvaloniaProperty.Register<VideoPlayerControl, string?>(nameof(Source), null);
+
+    /// <summary>
+    /// Defines the ControlPanelBackground property.
+    /// </summary>
+    public static readonly StyledProperty<Media.IBrush?> ControlPanelBackgroundProperty =
+        AvaloniaProperty.Register<VideoPlayerControl, Media.IBrush?>(nameof(ControlPanelBackground), null);
 
     /// <summary>
     /// Gets or sets the volume (0-100).
@@ -87,6 +107,35 @@ public partial class VideoPlayerControl : UserControl
     {
         get => GetValue(ShowControlsProperty);
         set => SetValue(ShowControlsProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets whether the Open button is visible.
+    /// When false, the Open button is hidden (useful for embedded players with programmatic source).
+    /// </summary>
+    public bool ShowOpenButton
+    {
+        get => GetValue(ShowOpenButtonProperty);
+        set => SetValue(ShowOpenButtonProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets the video source path. Setting this will automatically load and play the video.
+    /// </summary>
+    public string? Source
+    {
+        get => GetValue(SourceProperty);
+        set => SetValue(SourceProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets the background brush for the control panel.
+    /// Default is White. Set to any brush to customize the appearance.
+    /// </summary>
+    public Media.IBrush? ControlPanelBackground
+    {
+        get => GetValue(ControlPanelBackgroundProperty);
+        set => SetValue(ControlPanelBackgroundProperty, value);
     }
 
     /// <summary>
@@ -139,6 +188,8 @@ public partial class VideoPlayerControl : UserControl
         _playPauseIcon = this.FindControl<MaterialIcon>("PlayPauseIcon");
         _playPauseText = this.FindControl<TextBlock>("PlayPauseText");
         _volumeIcon = this.FindControl<MaterialIcon>("VolumeIcon");
+        _controlPanelBorder = this.FindControl<Border>("ControlPanelBorder");
+        _openButton = this.FindControl<Button>("OpenButton");
 
         // Setup seek bar events
         if (_seekBar != null)
@@ -157,6 +208,39 @@ public partial class VideoPlayerControl : UserControl
         // Initialize VLC when attached to visual tree
         this.AttachedToVisualTree += OnAttachedToVisualTree;
         this.DetachedFromVisualTree += OnDetachedFromVisualTree;
+        
+        // Handle property changes
+        this.PropertyChanged += OnPropertyChanged;
+    }
+
+    private void OnPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    {
+        if (e.Property == SourceProperty)
+        {
+            var newSource = e.NewValue as string;
+            if (!string.IsNullOrEmpty(newSource) && _isInitialized)
+            {
+                Open(newSource);
+                if (AutoPlay)
+                {
+                    Play();
+                }
+            }
+        }
+        else if (e.Property == ShowOpenButtonProperty)
+        {
+            if (_openButton != null)
+            {
+                _openButton.IsVisible = (bool)(e.NewValue ?? true);
+            }
+        }
+        else if (e.Property == ControlPanelBackgroundProperty)
+        {
+            if (_controlPanelBorder != null && e.NewValue is Media.IBrush brush)
+            {
+                _controlPanelBorder.Background = brush;
+            }
+        }
     }
 
     private void OnAttachedToVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
@@ -198,6 +282,26 @@ public partial class VideoPlayerControl : UserControl
             _mediaPlayer.EndReached += OnEndReached;
 
             _isInitialized = true;
+            
+            // Apply initial property values
+            if (_openButton != null)
+            {
+                _openButton.IsVisible = ShowOpenButton;
+            }
+            if (_controlPanelBorder != null && ControlPanelBackground != null)
+            {
+                _controlPanelBorder.Background = ControlPanelBackground;
+            }
+            
+            // Load source if set
+            if (!string.IsNullOrEmpty(Source))
+            {
+                Open(Source);
+                if (AutoPlay)
+                {
+                    Play();
+                }
+            }
         }
         catch (Exception ex)
         {

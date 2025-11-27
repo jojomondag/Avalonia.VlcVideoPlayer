@@ -46,7 +46,7 @@
         </Border>
         
         <!-- Controls Panel -->
-        <Border Grid.Row="1" Background="White" Padding="10">
+        <Border Name="ControlPanelBorder" Grid.Row="1" Background="White" Padding="10">
             <Grid RowDefinitions="Auto,Auto">
                 <!-- Seek Bar -->
                 <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,8">
