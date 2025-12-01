@@ -137,7 +137,7 @@ Here's a minimal working example:
     <PackageReference Include="Avalonia" Version="11.3.6" />
     <PackageReference Include="Avalonia.Desktop" Version="11.3.6" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.6" />
-    <PackageReference Include="VlcVideoPlayer.Avalonia" Version="1.6.0" />
+    <PackageReference Include="VlcVideoPlayer.Avalonia" Version="1.6.1" />
   </ItemGroup>
 </Project>
 ```
@@ -216,27 +216,6 @@ The control panel background can be customized to match your app's theme:
 <!-- Transparent (overlay style) -->
 <vlc:VideoPlayerControl ControlPanelBackground="Transparent" />
 ```
-
-## Platform Support
-
-| Platform | Architecture | VLC Source | Status |
-|----------|--------------|------------|--------|
-| **Windows** | x64 | `VideoLAN.LibVLC.Windows` NuGet | ✅ Works out of box |
-| **Windows** | x86 | `VideoLAN.LibVLC.Windows` NuGet | ✅ Works out of box |
-| **macOS** | x64 (Intel) | `VideoLAN.LibVLC.Mac` NuGet | ✅ Works out of box |
-| **macOS** | ARM64 (Apple Silicon) | System VLC (Homebrew) | ⚠️ Requires `brew install --cask vlc` |
-| **Linux** | x64 | System VLC | ⚠️ Requires `apt install vlc libvlc-dev` |
-| **Linux** | ARM64 | System VLC | ⚠️ Requires `apt install vlc libvlc-dev` |
-
-### How It Works
-
-- **Windows**: The `VideoLAN.LibVLC.Windows` NuGet package provides binaries in `libvlc/win-x64/`.
-
-- **macOS Intel**: The `VideoLAN.LibVLC.Mac` NuGet package provides binaries in `libvlc/osx-x64/`.
-
-- **macOS ARM64**: No NuGet package available. VlcInitializer detects VLC.app in `/Applications` or Homebrew installation.
-
-- **Linux**: No NuGet package available. VlcInitializer detects VLC in standard system paths (`/usr/lib/x86_64-linux-gnu`, `/usr/lib/aarch64-linux-gnu`, etc.).
 
 ## API Reference
 
