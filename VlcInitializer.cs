@@ -891,6 +891,17 @@ public static class VlcInitializer
             if (Directory.Exists(nugetPluginPath))
                 return nugetPluginPath;
         }
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            // VideoLAN.LibVLC.Mac NuGet package (Intel x64 only)
+            // Note: For ARM64, we fall back to VLC.app or download
+            if (!IsArm)
+            {
+                var nugetMacPluginPath = Path.Combine(baseDir, "libvlc", "osx-x64", "plugins");
+                if (Directory.Exists(nugetMacPluginPath))
+                    return nugetMacPluginPath;
+            }
+        }
 
         var embeddedPath = Path.Combine(baseDir, "vlc", "plugins");
         if (Directory.Exists(embeddedPath))
@@ -936,6 +947,17 @@ public static class VlcInitializer
             var embeddedVlcPath = Path.Combine(baseDir, "vlc");
             if (File.Exists(Path.Combine(embeddedVlcPath, "libvlc.dll")))
                 return embeddedVlcPath;
+        }
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            // VideoLAN.LibVLC.Mac NuGet package (Intel x64 only)
+            // Note: For ARM64 Macs, we skip this and fall back to VLC.app or download
+            if (!IsArm)
+            {
+                var nugetMacLibPath = Path.Combine(baseDir, "libvlc", "osx-x64");
+                if (File.Exists(Path.Combine(nugetMacLibPath, "libvlc.dylib")))
+                    return nugetMacLibPath;
+            }
         }
 
         var embeddedLibPath = Path.Combine(baseDir, "vlc", "lib");
