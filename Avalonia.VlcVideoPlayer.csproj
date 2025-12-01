@@ -7,11 +7,11 @@
     
     <!-- NuGet Package Properties -->
     <PackageId>VlcVideoPlayer.Avalonia</PackageId>
-    <Version>1.5.1</Version>
+    <Version>1.6.0</Version>
     <Authors>jojomondag</Authors>
     <Company>jojomondag</Company>
-    <Description>A self-contained VLC-based video player control for Avalonia UI. Automatically downloads and configures the correct VLC libraries for your platform (Windows/macOS/Linux) and architecture (x64/ARM64). Full Apple Silicon support!</Description>
-    <PackageReleaseNotes>v1.5.1: Added VideoLAN.LibVLC.Mac NuGet package for Intel Macs. ARM64 Macs automatically download correct VLC or use VLC.app.</PackageReleaseNotes>
+    <Description>A VLC-based video player control for Avalonia UI. Uses system-installed VLC on macOS/Linux, NuGet packages on Windows. Supports Windows (x64), macOS (Intel/Apple Silicon), and Linux (x64/ARM64).</Description>
+    <PackageReleaseNotes>v1.6.0: Simplified architecture - uses system-installed VLC on macOS/Linux. Windows uses VideoLAN.LibVLC.Windows NuGet. No more auto-downloads.</PackageReleaseNotes>
     <PackageTags>avalonia;vlc;video;player;media;libvlc;cross-platform</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/jojomondag/Avalonia.VlcVideoPlayer</PackageProjectUrl>
@@ -33,11 +33,9 @@
     <PackageReference Include="LibVLCSharp.Avalonia" Version="3.9.4" />
     <PackageReference Include="Material.Icons.Avalonia" Version="2.4.1" />
     
-    <!-- VideoLAN's official LibVLC native binaries - flow as transitive dependencies to consumers -->
-    <!-- Note: VideoLAN.LibVLC.Mac only supports Intel (x64). For Apple Silicon (ARM64), 
-         VlcInitializer will auto-download the correct VLC version from videolan.org -->
+    <!-- VideoLAN's official LibVLC native binaries for Windows (includes x64/x86) -->
+    <!-- macOS and Linux users must install VLC via system package manager (brew, apt, etc.) -->
     <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.21" PrivateAssets="contentfiles" />
-    <PackageReference Include="VideoLAN.LibVLC.Mac" Version="3.1.2" PrivateAssets="contentfiles" />
   </ItemGroup>
 
   <!-- 

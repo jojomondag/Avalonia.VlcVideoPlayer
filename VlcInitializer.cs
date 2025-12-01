@@ -1,50 +1,58 @@
 using System;
 using System.Diagnostics;
 using System.IO;
-using System.IO.Compression;
-using System.Net.Http;
 using System.Runtime.InteropServices;
-using System.Threading.Tasks;
 using LibVLCSharp.Shared;
 
 namespace Avalonia.VlcVideoPlayer;
 
 /// <summary>
-/// Handles VLC initialization and environment setup for embedded VLC libraries.
-/// Automatically downloads and sets up the correct VLC libraries for the current platform and architecture.
-/// Supports Windows (x64/ARM64), macOS (x64/ARM64), and Linux (x64/ARM64).
+/// Handles VLC initialization by detecting system-installed VLC libraries.
+/// 
+/// Platform Setup Requirements:
+/// 
+/// Windows: VLC binaries are included via the VideoLAN.LibVLC.Windows NuGet package.
+///          No additional setup required.
+/// 
+/// macOS:   Install VLC via Homebrew: brew install vlc
+///          Or install VLC.app from https://www.videolan.org/vlc/
+///          Supports both Intel (x64) and Apple Silicon (ARM64).
+/// 
+/// Linux:   Install VLC via your package manager:
+///          - Debian/Ubuntu: sudo apt install vlc libvlc-dev
+///          - Fedora: sudo dnf install vlc vlc-devel
+///          - Arch: sudo pacman -S vlc
+///          Supports both x64 and ARM64 architectures.
 /// </summary>
 public static class VlcInitializer
 {
-    // P/Invoke to set environment variable at the native level (works on macOS/Linux)
+    // P/Invoke to set environment variable at the native level (required for macOS/Linux)
     [DllImport("libc", SetLastError = true)]
     private static extern int setenv(string name, string value, int overwrite);
 
     private static bool _isInitialized;
     private static string? _vlcLibPath;
-
-    // VLC version to download
-    private const string VLC_VERSION = "3.0.21";
+    private static string? _initializationError;
 
     /// <summary>
-    /// Gets whether VLC has been initialized.
+    /// Gets whether VLC has been successfully initialized.
     /// </summary>
     public static bool IsInitialized => _isInitialized;
 
     /// <summary>
-    /// Gets the path to the VLC library directory being used.
+    /// Gets the path to the VLC library directory being used, or null if using system default.
     /// </summary>
     public static string? VlcLibPath => _vlcLibPath;
 
     /// <summary>
-    /// Gets the detected platform and architecture.
+    /// Gets any error message from initialization, or null if successful.
     /// </summary>
-    public static string PlatformInfo => $"{GetPlatformName()}-{GetArchitectureName()}";
+    public static string? InitializationError => _initializationError;
 
     /// <summary>
-    /// Event raised when download progress changes (0-100).
+    /// Gets the detected platform and architecture (e.g., "macos-arm64", "windows-x64").
     /// </summary>
-    public static event Action<int>? DownloadProgressChanged;
+    public static string PlatformInfo => $"{GetPlatformName()}-{GetArchitectureName()}";
 
     /// <summary>
     /// Event raised with status messages during initialization.
@@ -91,46 +99,17 @@ public static class VlcInitializer
 
     #endregion
 
-    #region VLC Download URLs
-
-    private static string GetVlcDownloadUrl()
-    {
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
-            // Windows: x64 available, ARM64 uses x64 via emulation
-            if (IsArm)
-            {
-                Log("Windows ARM64 detected - using x64 VLC (runs via emulation)");
-            }
-            return $"https://get.videolan.org/vlc/{VLC_VERSION}/win64/vlc-{VLC_VERSION}-win64.zip";
-        }
-
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-        {
-            // macOS: Both ARM64 (Apple Silicon) and Intel builds available
-            if (IsArm)
-            {
-                return $"https://get.videolan.org/vlc/{VLC_VERSION}/macosx/vlc-{VLC_VERSION}-arm64.dmg";
-            }
-            return $"https://get.videolan.org/vlc/{VLC_VERSION}/macosx/vlc-{VLC_VERSION}-intel64.dmg";
-        }
-
-        return string.Empty;
-    }
-
-    #endregion
-
     #region Initialization
 
     /// <summary>
-    /// Initializes VLC with embedded or system libraries.
+    /// Initializes VLC with system-installed libraries.
     /// Call this method BEFORE creating any Avalonia windows or VLC instances.
     /// Typically called at the very start of Main() in Program.cs.
     /// </summary>
     /// <param name="customVlcPath">Optional custom path to VLC libraries.</param>
-    /// <param name="autoDownload">If true, automatically download VLC if not found.</param>
     /// <returns>True if initialization succeeded, false otherwise.</returns>
-    public static bool Initialize(string? customVlcPath = null, bool autoDownload = true)
+    /// <exception cref="VlcNotFoundException">Thrown when VLC is not installed on the system.</exception>
+    public static bool Initialize(string? customVlcPath = null)
     {
         if (_isInitialized)
         {
@@ -140,111 +119,91 @@ public static class VlcInitializer
         try
         {
             Log($"Initializing VLC for {PlatformInfo}");
+            StatusChanged?.Invoke($"Initializing VLC for {PlatformInfo}...");
 
-            // First, try to find existing VLC installation
+            // Try to find VLC installation
             _vlcLibPath = FindVlcLibPath(customVlcPath);
-
-            // Validate architecture compatibility on macOS
-            if (_vlcLibPath != null && RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-            {
-                if (!ValidateMacOsArchitecture(_vlcLibPath))
-                {
-                    Log("Existing VLC has wrong architecture, will try to download correct version");
-                    _vlcLibPath = null;
-                }
-            }
 
             if (_vlcLibPath != null)
             {
+                // Validate architecture on macOS
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                {
+                    if (!ValidateMacOsArchitecture(_vlcLibPath))
+                    {
+                        var arch = IsArm ? "Apple Silicon (ARM64)" : "Intel (x64)";
+                        throw new VlcNotFoundException(
+                            $"Found VLC at {_vlcLibPath}, but it's not compatible with {arch}.\n" +
+                            GetInstallationInstructions());
+                    }
+                }
+
                 return InitializeWithPath(_vlcLibPath);
             }
 
-            // VLC not found - try auto-download if enabled
-            if (autoDownload)
+            // Windows: Try default initialization (NuGet package handles binaries)
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
-                StatusChanged?.Invoke("VLC libraries not found. Starting download...");
-                Log("VLC not found. Attempting to download...");
-
-                var downloadTask = DownloadVlcAsync();
-                downloadTask.Wait();
-
-                if (downloadTask.Result)
+                try
                 {
-                    _vlcLibPath = FindVlcLibPath(null);
-                    if (_vlcLibPath != null)
-                    {
-                        return InitializeWithPath(_vlcLibPath);
-                    }
+                    Log("Attempting default Windows initialization via NuGet package");
+                    Core.Initialize();
+                    _isInitialized = true;
+                    StatusChanged?.Invoke("VLC initialized via NuGet package");
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    throw new VlcNotFoundException(
+                        $"VLC libraries not found. {ex.Message}\n" +
+                        GetInstallationInstructions());
                 }
             }
 
-            // Fall back to system VLC
-            StatusChanged?.Invoke("Using system default VLC");
-            Log("Using system default VLC");
-            Core.Initialize();
-            _isInitialized = true;
-            return true;
+            // macOS/Linux: VLC not found
+            throw new VlcNotFoundException(
+                $"VLC libraries not found on {GetPlatformName()} ({GetArchitectureName()}).\n" +
+                GetInstallationInstructions());
+        }
+        catch (VlcNotFoundException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
+            _initializationError = ex.Message;
             StatusChanged?.Invoke($"Failed to initialize VLC: {ex.Message}");
             Log($"Failed to initialize VLC: {ex.Message}");
-            return false;
+            throw new VlcNotFoundException(
+                $"Failed to initialize VLC: {ex.Message}\n" +
+                GetInstallationInstructions(), ex);
         }
     }
 
     /// <summary>
-    /// Asynchronously initializes VLC with automatic download support.
+    /// Tries to initialize VLC without throwing exceptions.
     /// </summary>
-    public static async Task<bool> InitializeAsync(string? customVlcPath = null, bool autoDownload = true)
+    /// <param name="customVlcPath">Optional custom path to VLC libraries.</param>
+    /// <param name="errorMessage">Output parameter containing error message if initialization fails.</param>
+    /// <returns>True if initialization succeeded, false otherwise.</returns>
+    public static bool TryInitialize(string? customVlcPath, out string? errorMessage)
     {
-        if (_isInitialized)
-        {
-            return true;
-        }
-
         try
         {
-            Log($"Initializing VLC for {PlatformInfo}");
-
-            _vlcLibPath = FindVlcLibPath(customVlcPath);
-
-            // Validate architecture compatibility on macOS
-            if (_vlcLibPath != null && RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-            {
-                if (!ValidateMacOsArchitecture(_vlcLibPath))
-                {
-                    Log("Existing VLC has wrong architecture, will try to download correct version");
-                    _vlcLibPath = null;
-                }
-            }
-
-            if (_vlcLibPath != null)
-            {
-                return InitializeWithPath(_vlcLibPath);
-            }
-
-            if (autoDownload)
-            {
-                StatusChanged?.Invoke("VLC libraries not found. Starting download...");
-
-                if (await DownloadVlcAsync())
-                {
-                    _vlcLibPath = FindVlcLibPath(null);
-                    if (_vlcLibPath != null)
-                    {
-                        return InitializeWithPath(_vlcLibPath);
-                    }
-                }
-            }
-
-            Core.Initialize();
-            _isInitialized = true;
+            Initialize(customVlcPath);
+            errorMessage = null;
             return true;
+        }
+        catch (VlcNotFoundException ex)
+        {
+            errorMessage = ex.Message;
+            _initializationError = ex.Message;
+            return false;
         }
         catch (Exception ex)
         {
-            StatusChanged?.Invoke($"Failed to initialize VLC: {ex.Message}");
+            errorMessage = ex.Message;
+            _initializationError = ex.Message;
             return false;
         }
     }
@@ -259,7 +218,6 @@ public static class VlcInitializer
         }
 
         // Set library path environment variable BEFORE Core.Initialize()
-        // This is critical on macOS where DYLD_LIBRARY_PATH must be set
         SetLibraryPath(libPath);
 
         StatusChanged?.Invoke($"Using VLC from: {libPath}");
@@ -268,6 +226,127 @@ public static class VlcInitializer
         Core.Initialize(libPath);
         _isInitialized = true;
         return true;
+    }
+
+    #endregion
+
+    #region Installation Instructions
+
+    /// <summary>
+    /// Gets platform-specific VLC installation instructions.
+    /// </summary>
+    public static string GetInstallationInstructions()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return @"
+WINDOWS INSTALLATION:
+VLC binaries should be included via the VideoLAN.LibVLC.Windows NuGet package.
+Ensure your project references 'VideoLAN.LibVLC.Windows' version 3.0.21 or later.
+
+If issues persist, install VLC manually from: https://www.videolan.org/vlc/";
+        }
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            var arch = IsArm ? "Apple Silicon (ARM64)" : "Intel (x64)";
+            if (IsArm)
+            {
+                return $@"
+macOS INSTALLATION ({arch}):
+
+IMPORTANT: Homebrew's VLC cask installs an Intel (x86_64) version.
+For Apple Silicon Macs, download the ARM64 version directly:
+
+1. Visit https://www.videolan.org/vlc/download-macosx.html
+2. Click 'Apple Silicon Package' to download vlc-3.0.21-arm64.dmg
+3. Install VLC.app to /Applications
+
+Direct download link:
+https://get.videolan.org/vlc/3.0.21/macosx/vlc-3.0.21-arm64.dmg";
+            }
+            return $@"
+macOS INSTALLATION ({arch}):
+
+Option 1 - Homebrew:
+    brew install vlc
+
+Option 2 - Download VLC.app:
+    1. Visit https://www.videolan.org/vlc/download-macosx.html
+    2. Download the Intel 64-bit version
+    3. Install VLC.app to /Applications";
+        }
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            var arch = GetArchitectureName();
+            return $@"
+LINUX INSTALLATION ({arch}):
+
+Debian/Ubuntu:
+    sudo apt update
+    sudo apt install vlc libvlc-dev
+
+Fedora:
+    sudo dnf install vlc vlc-devel
+
+Arch Linux:
+    sudo pacman -S vlc
+
+openSUSE:
+    sudo zypper install vlc vlc-devel
+
+After installation, the VLC libraries should be automatically detected.";
+        }
+
+        return "Please install VLC from https://www.videolan.org/vlc/";
+    }
+
+    /// <summary>
+    /// Checks if VLC is properly installed on the system.
+    /// </summary>
+    public static VlcInstallationStatus CheckInstallation()
+    {
+        var status = new VlcInstallationStatus
+        {
+            Platform = GetPlatformName(),
+            Architecture = GetArchitectureName()
+        };
+
+        try
+        {
+            var libPath = FindVlcLibPath(null);
+
+            if (libPath != null)
+            {
+                status.IsInstalled = true;
+                status.LibraryPath = libPath;
+
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                {
+                    status.IsArchitectureCompatible = ValidateMacOsArchitecture(libPath);
+                }
+                else
+                {
+                    status.IsArchitectureCompatible = true;
+                }
+            }
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                // Check if NuGet package is available
+                var nugetPath = Path.Combine(AppContext.BaseDirectory, "libvlc", "win-x64");
+                status.IsInstalled = Directory.Exists(nugetPath);
+                status.LibraryPath = nugetPath;
+                status.IsArchitectureCompatible = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            status.Error = ex.Message;
+        }
+
+        status.InstallationInstructions = GetInstallationInstructions();
+        return status;
     }
 
     #endregion
@@ -282,19 +361,11 @@ public static class VlcInitializer
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
             return true;
 
-        var libvlcPath = Path.Combine(libPath, "libvlc.dylib");
-        if (!File.Exists(libvlcPath))
+        var libvlcPath = FindLibVlcDylib(libPath);
+        if (libvlcPath == null)
         {
-            // Try parent directory
-            var parentLib = Path.Combine(Path.GetDirectoryName(libPath) ?? "", "lib", "libvlc.dylib");
-            if (File.Exists(parentLib))
-            {
-                libvlcPath = parentLib;
-            }
-            else
-            {
-                return true; // Can't validate, assume OK
-            }
+            Log($"Could not find libvlc.dylib in {libPath}");
+            return true; // Can't validate, assume OK
         }
 
         try
@@ -319,7 +390,11 @@ public static class VlcInitializer
 
             if (!isCompatible)
             {
-                Log($"Architecture mismatch: VLC is not {expectedArch}. Output: {output.Trim()}");
+                Log($"Architecture mismatch: Expected {expectedArch}, but VLC is: {output.Trim()}");
+            }
+            else
+            {
+                Log($"Architecture validated: {expectedArch}");
             }
 
             return isCompatible;
@@ -331,488 +406,334 @@ public static class VlcInitializer
         }
     }
 
+    private static string? FindLibVlcDylib(string basePath)
+    {
+        // Direct path
+        var direct = Path.Combine(basePath, "libvlc.dylib");
+        if (File.Exists(direct)) return direct;
+
+        // In lib subdirectory
+        var inLib = Path.Combine(basePath, "lib", "libvlc.dylib");
+        if (File.Exists(inLib)) return inLib;
+
+        // Parent lib directory
+        var parent = Path.GetDirectoryName(basePath);
+        if (parent != null)
+        {
+            var parentLib = Path.Combine(parent, "lib", "libvlc.dylib");
+            if (File.Exists(parentLib)) return parentLib;
+        }
+
+        return null;
+    }
+
     #endregion
 
-    #region Download Methods
+    #region Path Discovery
 
-    /// <summary>
-    /// Downloads VLC libraries for the current platform and architecture.
-    /// </summary>
-    public static async Task<bool> DownloadVlcAsync()
+    private static string? FindVlcLibPath(string? customPath)
     {
-        try
+        // 1. Custom path provided by user
+        if (!string.IsNullOrEmpty(customPath))
         {
-            var vlcDir = GetVlcDirectory();
-
-            // Check if already downloaded with correct architecture
-            if (Directory.Exists(vlcDir))
+            var resolved = ResolveVlcPath(customPath);
+            if (resolved != null)
             {
-                var libDir = Path.Combine(vlcDir, "lib");
-                if (Directory.Exists(libDir))
-                {
-                    if (!RuntimeInformation.IsOSPlatform(OSPlatform.OSX) || ValidateMacOsArchitecture(libDir))
-                    {
-                        StatusChanged?.Invoke("VLC already downloaded");
-                        return true;
-                    }
-                    // Wrong architecture, delete and re-download
-                    Log("Existing VLC has wrong architecture, re-downloading...");
-                    Directory.Delete(vlcDir, true);
-                }
+                Log($"Found VLC at custom path: {resolved}");
+                return resolved;
             }
-
-            Directory.CreateDirectory(vlcDir);
-
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            {
-                return await DownloadVlcWindowsAsync(vlcDir);
-            }
-            else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-            {
-                return await DownloadVlcMacOsAsync(vlcDir);
-            }
-            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-            {
-                return await DownloadVlcLinuxAsync(vlcDir);
-            }
-
-            return false;
         }
-        catch (Exception ex)
+
+        // 2. Platform-specific detection
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
-            StatusChanged?.Invoke($"Download failed: {ex.Message}");
-            Log($"Download failed: {ex.Message}");
-            return false;
+            return FindWindowsVlc();
         }
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            return FindMacOsVlc();
+        }
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            return FindLinuxVlc();
+        }
+
+        return null;
     }
 
-    private static string GetVlcDirectory()
+    private static string? FindWindowsVlc()
     {
-        // Include architecture in directory name to handle multiple architectures
-        var archSuffix = GetArchitectureName();
-        return Path.Combine(AppContext.BaseDirectory, "vlc", archSuffix);
-    }
+        var baseDir = AppContext.BaseDirectory;
 
-    private static async Task<bool> DownloadVlcWindowsAsync(string vlcDir)
-    {
-        var archInfo = IsArm ? "ARM64 (using x64 via emulation)" : "x64";
-        StatusChanged?.Invoke($"Downloading VLC for Windows {archInfo}...");
-        Log($"Downloading VLC for Windows {archInfo}");
-
-        using var httpClient = CreateHttpClient();
-        var url = GetVlcDownloadUrl();
-        var zipPath = Path.Combine(vlcDir, "vlc.zip");
-
-        await DownloadFileAsync(httpClient, url, zipPath);
-
-        StatusChanged?.Invoke("Extracting VLC...");
-
-        // Extract the ZIP
-        var extractDir = Path.Combine(vlcDir, "extract");
-        ZipFile.ExtractToDirectory(zipPath, extractDir, true);
-
-        // Find the extracted VLC folder and move contents
-        var vlcExtractedDir = Directory.GetDirectories(extractDir).FirstOrDefault();
-        if (vlcExtractedDir != null)
+        // 1. VideoLAN.LibVLC.Windows NuGet package (primary method)
+        var nugetPaths = new[]
         {
-            CopyDirectory(vlcExtractedDir, vlcDir);
-        }
-
-        // Cleanup
-        File.Delete(zipPath);
-        Directory.Delete(extractDir, true);
-
-        // Handle plugins folder naming
-        var plugins64Dir = Path.Combine(vlcDir, "plugins64");
-        var pluginsDir = Path.Combine(vlcDir, "plugins");
-        if (Directory.Exists(plugins64Dir) && !Directory.Exists(pluginsDir))
-        {
-            Directory.Move(plugins64Dir, pluginsDir);
-        }
-
-        // Create lib folder structure
-        var libDir = Path.Combine(vlcDir, "lib");
-        if (!Directory.Exists(libDir))
-        {
-            Directory.CreateDirectory(libDir);
-            var libvlcDll = Path.Combine(vlcDir, "libvlc.dll");
-            var libvlccoreDll = Path.Combine(vlcDir, "libvlccore.dll");
-            if (File.Exists(libvlcDll)) File.Copy(libvlcDll, Path.Combine(libDir, "libvlc.dll"), true);
-            if (File.Exists(libvlccoreDll)) File.Copy(libvlccoreDll, Path.Combine(libDir, "libvlccore.dll"), true);
-        }
-
-        StatusChanged?.Invoke("VLC downloaded and extracted successfully");
-        return true;
-    }
-
-    private static async Task<bool> DownloadVlcMacOsAsync(string vlcDir)
-    {
-        var archInfo = IsArm ? "Apple Silicon (ARM64)" : "Intel (x64)";
-        StatusChanged?.Invoke($"Setting up VLC for macOS {archInfo}...");
-        Log($"Setting up VLC for macOS {archInfo}");
-
-        // First check if VLC.app exists and has correct architecture
-        var vlcAppPath = "/Applications/VLC.app/Contents/MacOS";
-        if (Directory.Exists(vlcAppPath))
-        {
-            var vlcAppLibPath = Path.Combine(vlcAppPath, "lib");
-            if (ValidateMacOsArchitecture(vlcAppLibPath))
-            {
-                StatusChanged?.Invoke("Found compatible VLC.app - copying libraries...");
-                return CopyFromVlcApp(vlcDir, vlcAppPath);
-            }
-            else
-            {
-                Log("VLC.app has wrong architecture, will download correct version");
-            }
-        }
-
-        // Download DMG and extract
-        using var httpClient = CreateHttpClient();
-        var url = GetVlcDownloadUrl();
-        var dmgPath = Path.Combine(vlcDir, "vlc.dmg");
-
-        StatusChanged?.Invoke($"Downloading VLC for macOS {archInfo}...");
-        await DownloadFileAsync(httpClient, url, dmgPath);
-
-        StatusChanged?.Invoke("Extracting VLC from DMG...");
-
-        // Mount DMG and copy files
-        var success = await ExtractFromDmgAsync(dmgPath, vlcDir);
-
-        // Cleanup DMG
-        if (File.Exists(dmgPath))
-        {
-            File.Delete(dmgPath);
-        }
-
-        if (success)
-        {
-            StatusChanged?.Invoke("VLC downloaded and extracted successfully");
-        }
-
-        return success;
-    }
-
-    private static async Task<bool> ExtractFromDmgAsync(string dmgPath, string vlcDir)
-    {
-        try
-        {
-            // Create a temporary mount point
-            var mountPoint = Path.Combine(Path.GetTempPath(), $"vlc_mount_{Guid.NewGuid():N}");
-            Directory.CreateDirectory(mountPoint);
-
-            try
-            {
-                // Mount the DMG
-                Log($"Mounting DMG: {dmgPath}");
-                var mountResult = await RunProcessAsync("hdiutil", $"attach \"{dmgPath}\" -mountpoint \"{mountPoint}\" -nobrowse -quiet");
-                if (!mountResult.Success)
-                {
-                    Log($"Failed to mount DMG: {mountResult.Error}");
-                    return await FallbackMacOsDownload(vlcDir);
-                }
-
-                try
-                {
-                    // Find VLC.app in the mounted DMG
-                    var vlcAppInDmg = Path.Combine(mountPoint, "VLC.app", "Contents", "MacOS");
-                    if (!Directory.Exists(vlcAppInDmg))
-                    {
-                        // Try to find it
-                        var vlcApps = Directory.GetDirectories(mountPoint, "VLC.app", SearchOption.TopDirectoryOnly);
-                        if (vlcApps.Length > 0)
-                        {
-                            vlcAppInDmg = Path.Combine(vlcApps[0], "Contents", "MacOS");
-                        }
-                    }
-
-                    if (Directory.Exists(vlcAppInDmg))
-                    {
-                        return CopyFromVlcApp(vlcDir, vlcAppInDmg);
-                    }
-                    else
-                    {
-                        Log($"Could not find VLC.app in DMG at {mountPoint}");
-                        return false;
-                    }
-                }
-                finally
-                {
-                    // Unmount the DMG
-                    await RunProcessAsync("hdiutil", $"detach \"{mountPoint}\" -quiet -force");
-                }
-            }
-            finally
-            {
-                // Cleanup mount point
-                if (Directory.Exists(mountPoint))
-                {
-                    try { Directory.Delete(mountPoint, true); } catch { }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Log($"DMG extraction failed: {ex.Message}");
-            return await FallbackMacOsDownload(vlcDir);
-        }
-    }
-
-    private static bool CopyFromVlcApp(string vlcDir, string vlcAppPath)
-    {
-        try
-        {
-            var libDir = Path.Combine(vlcDir, "lib");
-            var pluginsDir = Path.Combine(vlcDir, "plugins");
-
-            Directory.CreateDirectory(libDir);
-            Directory.CreateDirectory(pluginsDir);
-
-            // Copy lib folder
-            var srcLibDir = Path.Combine(vlcAppPath, "lib");
-            if (Directory.Exists(srcLibDir))
-            {
-                CopyDirectory(srcLibDir, libDir);
-                Log($"Copied lib folder from {srcLibDir}");
-            }
-
-            // Copy plugins folder
-            var srcPluginsDir = Path.Combine(vlcAppPath, "plugins");
-            if (Directory.Exists(srcPluginsDir))
-            {
-                CopyDirectory(srcPluginsDir, pluginsDir);
-                Log($"Copied plugins folder from {srcPluginsDir}");
-            }
-
-            StatusChanged?.Invoke("VLC libraries copied successfully");
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Log($"Failed to copy VLC libraries: {ex.Message}");
-            return false;
-        }
-    }
-
-    private static async Task<bool> FallbackMacOsDownload(string vlcDir)
-    {
-        var arch = IsArm ? "Apple Silicon" : "Intel";
-        var message = $"Please install VLC ({arch}) from https://www.videolan.org/vlc/download-macosx.html";
-        StatusChanged?.Invoke(message);
-        Log(message);
-
-        // Try to open the download page
-        try
-        {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = "open",
-                Arguments = "https://www.videolan.org/vlc/download-macosx.html",
-                UseShellExecute = false
-            });
-        }
-        catch { }
-
-        return false;
-    }
-
-    private static async Task<bool> DownloadVlcLinuxAsync(string vlcDir)
-    {
-        var arch = GetArchitectureName();
-        StatusChanged?.Invoke($"Detecting Linux VLC installation for {arch}...");
-        Log($"Linux {arch} detected");
-
-        // On Linux, we should use the system package manager
-        // Check if VLC is already installed
-        var vlcInstalled = await CheckLinuxVlcInstalledAsync();
-        if (vlcInstalled)
-        {
-            StatusChanged?.Invoke("VLC is installed via system package manager");
-            return true;
-        }
-
-        // Provide instructions based on distribution
-        var distro = await DetectLinuxDistroAsync();
-        var installCmd = distro switch
-        {
-            "debian" or "ubuntu" => "sudo apt install vlc libvlc-dev",
-            "fedora" => "sudo dnf install vlc vlc-devel",
-            "arch" => "sudo pacman -S vlc",
-            "opensuse" => "sudo zypper install vlc vlc-devel",
-            _ => "Please install VLC using your distribution's package manager"
+            Path.Combine(baseDir, "libvlc", "win-x64"),
+            Path.Combine(baseDir, "libvlc", "win-x86"),
+            Path.Combine(baseDir, "runtimes", "win-x64", "native"),
+            Path.Combine(baseDir, "runtimes", "win-x86", "native"),
         };
 
-        StatusChanged?.Invoke($"Please install VLC: {installCmd}");
-        Log($"Linux VLC installation command: {installCmd}");
-
-        // Try to find system VLC paths for different architectures
-        var systemPaths = GetLinuxLibraryPaths();
-        foreach (var path in systemPaths)
+        foreach (var path in nugetPaths)
         {
-            if (File.Exists(Path.Combine(path, "libvlc.so")) ||
-                File.Exists(Path.Combine(path, "libvlc.so.5")))
+            if (File.Exists(Path.Combine(path, "libvlc.dll")))
             {
-                // Create symlink or reference to system VLC
-                var libDir = Path.Combine(vlcDir, "lib");
-                Directory.CreateDirectory(libDir);
-
-                // Write a marker file indicating system VLC should be used
-                File.WriteAllText(Path.Combine(vlcDir, "use_system_vlc"), path);
-                return true;
+                Log($"Found VLC via NuGet package: {path}");
+                return path;
             }
         }
 
-        return false;
+        // 2. Application directory
+        if (File.Exists(Path.Combine(baseDir, "libvlc.dll")))
+        {
+            Log($"Found VLC in application directory: {baseDir}");
+            return baseDir;
+        }
+
+        // 3. Common VLC installation paths
+        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        var programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+
+        var installPaths = new[]
+        {
+            Path.Combine(programFiles, "VideoLAN", "VLC"),
+            Path.Combine(programFilesX86, "VideoLAN", "VLC"),
+        };
+
+        foreach (var path in installPaths)
+        {
+            if (File.Exists(Path.Combine(path, "libvlc.dll")))
+            {
+                Log($"Found VLC installation: {path}");
+                return path;
+            }
+        }
+
+        return null;
     }
 
-    private static string[] GetLinuxLibraryPaths()
+    private static string? FindMacOsVlc()
     {
-        var paths = new List<string>();
+        // 1. Homebrew installation (universal binary - supports both Intel and ARM64)
+        var homebrewPaths = new[]
+        {
+            "/opt/homebrew/lib",           // Homebrew on Apple Silicon
+            "/usr/local/lib",              // Homebrew on Intel
+            "/opt/homebrew/Cellar/vlc",    // Homebrew Cellar on Apple Silicon
+            "/usr/local/Cellar/vlc",       // Homebrew Cellar on Intel
+        };
+
+        foreach (var path in homebrewPaths)
+        {
+            if (File.Exists(Path.Combine(path, "libvlc.dylib")))
+            {
+                Log($"Found VLC via Homebrew: {path}");
+                return path;
+            }
+
+            // Check Cellar subdirectories
+            if (path.Contains("Cellar") && Directory.Exists(path))
+            {
+                try
+                {
+                    foreach (var versionDir in Directory.GetDirectories(path))
+                    {
+                        var libPath = Path.Combine(versionDir, "lib");
+                        if (File.Exists(Path.Combine(libPath, "libvlc.dylib")))
+                        {
+                            Log($"Found VLC via Homebrew Cellar: {libPath}");
+                            return libPath;
+                        }
+                    }
+                }
+                catch { }
+            }
+        }
+
+        // 2. VLC.app installation
+        var vlcAppLib = "/Applications/VLC.app/Contents/MacOS/lib";
+        if (Directory.Exists(vlcAppLib))
+        {
+            Log($"Found VLC.app: {vlcAppLib}");
+            return vlcAppLib;
+        }
+
+        // 3. User Applications folder
+        var userVlcAppLib = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "Applications/VLC.app/Contents/MacOS/lib");
+        if (Directory.Exists(userVlcAppLib))
+        {
+            Log($"Found VLC.app in user Applications: {userVlcAppLib}");
+            return userVlcAppLib;
+        }
+
+        // 4. NuGet package (Intel x64 only)
+        if (!IsArm)
+        {
+            var baseDir = AppContext.BaseDirectory;
+            var nugetPath = Path.Combine(baseDir, "libvlc", "osx-x64");
+            if (File.Exists(Path.Combine(nugetPath, "libvlc.dylib")))
+            {
+                Log($"Found VLC via NuGet package (Intel): {nugetPath}");
+                return nugetPath;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? FindLinuxVlc()
+    {
+        // System library paths (architecture-specific)
+        var systemPaths = new System.Collections.Generic.List<string>();
 
         if (IsArm)
         {
-            paths.AddRange(new[]
+            systemPaths.AddRange(new[]
             {
-                "/usr/lib/aarch64-linux-gnu",
-                "/usr/lib64",
-                "/usr/lib"
+                "/usr/lib/aarch64-linux-gnu",        // Debian/Ubuntu ARM64
+                "/usr/lib64",                         // Fedora/RHEL ARM64
+                "/usr/lib/arm-linux-gnueabihf",      // Debian/Ubuntu ARMv7
             });
         }
         else
         {
-            paths.AddRange(new[]
+            systemPaths.AddRange(new[]
             {
-                "/usr/lib/x86_64-linux-gnu",
-                "/usr/lib64",
-                "/usr/lib"
+                "/usr/lib/x86_64-linux-gnu",         // Debian/Ubuntu x64
+                "/usr/lib64",                         // Fedora/RHEL x64
+                "/usr/lib/i386-linux-gnu",           // Debian/Ubuntu x86
+                "/usr/lib32",                         // 32-bit libs on 64-bit system
             });
         }
 
-        // Add common paths
-        paths.Add("/usr/local/lib");
-
-        return paths.ToArray();
-    }
-
-    private static async Task<bool> CheckLinuxVlcInstalledAsync()
-    {
-        var result = await RunProcessAsync("which", "vlc");
-        return result.Success && !string.IsNullOrEmpty(result.Output);
-    }
-
-    private static async Task<string> DetectLinuxDistroAsync()
-    {
-        try
+        // Common paths for all architectures
+        systemPaths.AddRange(new[]
         {
-            if (File.Exists("/etc/os-release"))
+            "/usr/lib",
+            "/usr/local/lib",
+            "/lib",
+        });
+
+        foreach (var path in systemPaths)
+        {
+            if (HasVlcLibrary(path))
             {
-                var content = await File.ReadAllTextAsync("/etc/os-release");
-                if (content.Contains("ubuntu", StringComparison.OrdinalIgnoreCase) ||
-                    content.Contains("debian", StringComparison.OrdinalIgnoreCase))
-                    return "debian";
-                if (content.Contains("fedora", StringComparison.OrdinalIgnoreCase))
-                    return "fedora";
-                if (content.Contains("arch", StringComparison.OrdinalIgnoreCase))
-                    return "arch";
-                if (content.Contains("opensuse", StringComparison.OrdinalIgnoreCase))
-                    return "opensuse";
+                Log($"Found VLC at: {path}");
+                return path;
+            }
+
+            // Check vlc subdirectory
+            var vlcSubdir = Path.Combine(path, "vlc");
+            if (HasVlcLibrary(vlcSubdir))
+            {
+                Log($"Found VLC at: {vlcSubdir}");
+                return vlcSubdir;
             }
         }
-        catch { }
 
-        return "unknown";
+        // Check LD_LIBRARY_PATH
+        var ldPath = Environment.GetEnvironmentVariable("LD_LIBRARY_PATH");
+        if (!string.IsNullOrEmpty(ldPath))
+        {
+            foreach (var path in ldPath.Split(':'))
+            {
+                if (HasVlcLibrary(path))
+                {
+                    Log($"Found VLC via LD_LIBRARY_PATH: {path}");
+                    return path;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static string? ResolveVlcPath(string path)
+    {
+        // Direct library files
+        if (HasVlcLibrary(path))
+            return path;
+
+        // Check lib subdirectory
+        var libPath = Path.Combine(path, "lib");
+        if (HasVlcLibrary(libPath))
+            return libPath;
+
+        // macOS .app bundle
+        if (path.EndsWith(".app") && RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            var appLibPath = Path.Combine(path, "Contents", "MacOS", "lib");
+            if (HasVlcLibrary(appLibPath))
+                return appLibPath;
+        }
+
+        return null;
+    }
+
+    private static bool HasVlcLibrary(string path)
+    {
+        if (!Directory.Exists(path))
+            return false;
+
+        return File.Exists(Path.Combine(path, "libvlc.dylib")) ||
+               File.Exists(Path.Combine(path, "libvlc.so")) ||
+               File.Exists(Path.Combine(path, "libvlc.so.5")) ||
+               File.Exists(Path.Combine(path, "libvlc.dll"));
+    }
+
+    private static string? FindPluginPath(string? basePath)
+    {
+        if (string.IsNullOrEmpty(basePath))
+            return null;
+
+        // Direct plugins folder
+        var pluginsPath = Path.Combine(basePath, "plugins");
+        if (Directory.Exists(pluginsPath))
+            return pluginsPath;
+
+        // Parent directory plugins
+        var parent = Path.GetDirectoryName(basePath);
+        if (parent != null)
+        {
+            var parentPlugins = Path.Combine(parent, "plugins");
+            if (Directory.Exists(parentPlugins))
+                return parentPlugins;
+        }
+
+        // macOS: VLC.app plugins
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            var vlcAppPlugins = "/Applications/VLC.app/Contents/MacOS/plugins";
+            if (Directory.Exists(vlcAppPlugins))
+                return vlcAppPlugins;
+        }
+
+        // Linux: System plugins
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            var linuxPluginPaths = new[]
+            {
+                "/usr/lib/vlc/plugins",
+                "/usr/lib64/vlc/plugins",
+                "/usr/local/lib/vlc/plugins",
+                $"/usr/lib/{(IsArm ? "aarch64" : "x86_64")}-linux-gnu/vlc/plugins",
+            };
+
+            foreach (var path in linuxPluginPaths)
+            {
+                if (Directory.Exists(path))
+                    return path;
+            }
+        }
+
+        return null;
     }
 
     #endregion
 
-    #region Helper Methods
-
-    private static HttpClient CreateHttpClient()
-    {
-        var client = new HttpClient();
-        client.Timeout = TimeSpan.FromMinutes(30);
-        client.DefaultRequestHeaders.Add("User-Agent", "Avalonia.VlcVideoPlayer");
-        return client;
-    }
-
-    private static async Task DownloadFileAsync(HttpClient httpClient, string url, string destinationPath)
-    {
-        Log($"Downloading from: {url}");
-
-        using var response = await httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
-        response.EnsureSuccessStatusCode();
-
-        var totalBytes = response.Content.Headers.ContentLength ?? -1;
-
-        using var stream = await response.Content.ReadAsStreamAsync();
-        using var fileStream = File.Create(destinationPath);
-
-        var buffer = new byte[81920];
-        var bytesRead = 0L;
-        int read;
-
-        while ((read = await stream.ReadAsync(buffer, 0, buffer.Length)) > 0)
-        {
-            await fileStream.WriteAsync(buffer, 0, read);
-            bytesRead += read;
-
-            if (totalBytes > 0)
-            {
-                var progress = (int)((bytesRead * 100) / totalBytes);
-                DownloadProgressChanged?.Invoke(progress);
-            }
-        }
-
-        Log($"Download complete: {destinationPath}");
-    }
-
-    private static async Task<(bool Success, string Output, string Error)> RunProcessAsync(string fileName, string arguments)
-    {
-        try
-        {
-            var psi = new ProcessStartInfo
-            {
-                FileName = fileName,
-                Arguments = arguments,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-
-            using var process = Process.Start(psi);
-            if (process == null)
-                return (false, "", "Failed to start process");
-
-            var output = await process.StandardOutput.ReadToEndAsync();
-            var error = await process.StandardError.ReadToEndAsync();
-            await process.WaitForExitAsync();
-
-            return (process.ExitCode == 0, output, error);
-        }
-        catch (Exception ex)
-        {
-            return (false, "", ex.Message);
-        }
-    }
-
-    private static void CopyDirectory(string sourceDir, string destDir)
-    {
-        Directory.CreateDirectory(destDir);
-
-        foreach (var file in Directory.GetFiles(sourceDir))
-        {
-            var destFile = Path.Combine(destDir, Path.GetFileName(file));
-            File.Copy(file, destFile, true);
-        }
-
-        foreach (var dir in Directory.GetDirectories(sourceDir))
-        {
-            var destSubDir = Path.Combine(destDir, Path.GetFileName(dir));
-            CopyDirectory(dir, destSubDir);
-        }
-    }
+    #region Environment Setup
 
     private static void SetPluginPath(string pluginPath)
     {
@@ -835,12 +756,12 @@ public static class VlcInitializer
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
         {
-            // On macOS, DYLD_LIBRARY_PATH is needed for the dynamic linker to find libvlc.dylib
+            // DYLD_LIBRARY_PATH needed for the dynamic linker to find libvlc.dylib
             var existingPath = Environment.GetEnvironmentVariable("DYLD_LIBRARY_PATH");
             var newPath = string.IsNullOrEmpty(existingPath) ? libPath : $"{libPath}:{existingPath}";
             setenv("DYLD_LIBRARY_PATH", newPath, 1);
 
-            // Also set DYLD_FALLBACK_LIBRARY_PATH as a fallback mechanism
+            // Also set DYLD_FALLBACK_LIBRARY_PATH as a fallback
             var existingFallback = Environment.GetEnvironmentVariable("DYLD_FALLBACK_LIBRARY_PATH");
             var newFallback = string.IsNullOrEmpty(existingFallback) ? libPath : $"{libPath}:{existingFallback}";
             setenv("DYLD_FALLBACK_LIBRARY_PATH", newFallback, 1);
@@ -849,7 +770,7 @@ public static class VlcInitializer
         }
         else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
-            // On Linux, LD_LIBRARY_PATH is used
+            // LD_LIBRARY_PATH is used on Linux
             var existingPath = Environment.GetEnvironmentVariable("LD_LIBRARY_PATH");
             var newPath = string.IsNullOrEmpty(existingPath) ? libPath : $"{libPath}:{existingPath}";
             setenv("LD_LIBRARY_PATH", newPath, 1);
@@ -857,7 +778,7 @@ public static class VlcInitializer
         }
         else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
-            // On Windows, add to PATH
+            // Add to PATH on Windows
             var existingPath = Environment.GetEnvironmentVariable("PATH") ?? "";
             if (!existingPath.Contains(libPath))
             {
@@ -867,135 +788,83 @@ public static class VlcInitializer
         }
     }
 
-    private static string? FindPluginPath(string? customPath)
-    {
-        if (!string.IsNullOrEmpty(customPath))
-        {
-            var customPluginPath = Path.Combine(customPath, "plugins");
-            if (Directory.Exists(customPluginPath))
-                return customPluginPath;
-        }
+    #endregion
 
-        var baseDir = AppContext.BaseDirectory;
-        var archDir = GetArchitectureName();
-
-        // Check architecture-specific embedded path
-        var embeddedArchPath = Path.Combine(baseDir, "vlc", archDir, "plugins");
-        if (Directory.Exists(embeddedArchPath))
-            return embeddedArchPath;
-
-        // Check for VideoLAN.LibVLC NuGet package structure
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
-            var nugetPluginPath = Path.Combine(baseDir, "libvlc", "win-x64", "plugins");
-            if (Directory.Exists(nugetPluginPath))
-                return nugetPluginPath;
-        }
-        else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-        {
-            // VideoLAN.LibVLC.Mac NuGet package (Intel x64 only)
-            // Note: For ARM64, we fall back to VLC.app or download
-            if (!IsArm)
-            {
-                var nugetMacPluginPath = Path.Combine(baseDir, "libvlc", "osx-x64", "plugins");
-                if (Directory.Exists(nugetMacPluginPath))
-                    return nugetMacPluginPath;
-            }
-        }
-
-        var embeddedPath = Path.Combine(baseDir, "vlc", "plugins");
-        if (Directory.Exists(embeddedPath))
-            return embeddedPath;
-
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-        {
-            var macOsPluginPath = "/Applications/VLC.app/Contents/MacOS/plugins";
-            if (Directory.Exists(macOsPluginPath))
-                return macOsPluginPath;
-        }
-
-        return null;
-    }
-
-    private static string? FindVlcLibPath(string? customPath)
-    {
-        if (!string.IsNullOrEmpty(customPath))
-        {
-            var customLibPath = Path.Combine(customPath, "lib");
-            if (Directory.Exists(customLibPath))
-                return customLibPath;
-
-            if (Directory.Exists(customPath) && HasVlcLibrary(customPath))
-                return customPath;
-        }
-
-        var baseDir = AppContext.BaseDirectory;
-        var archDir = GetArchitectureName();
-
-        // Check architecture-specific embedded path
-        var embeddedArchLibPath = Path.Combine(baseDir, "vlc", archDir, "lib");
-        if (Directory.Exists(embeddedArchLibPath))
-            return embeddedArchLibPath;
-
-        // Check for VideoLAN.LibVLC NuGet package structure
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
-            var nugetLibPath = Path.Combine(baseDir, "libvlc", "win-x64");
-            if (File.Exists(Path.Combine(nugetLibPath, "libvlc.dll")))
-                return nugetLibPath;
-
-            var embeddedVlcPath = Path.Combine(baseDir, "vlc");
-            if (File.Exists(Path.Combine(embeddedVlcPath, "libvlc.dll")))
-                return embeddedVlcPath;
-        }
-        else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-        {
-            // VideoLAN.LibVLC.Mac NuGet package (Intel x64 only)
-            // Note: For ARM64 Macs, we skip this and fall back to VLC.app or download
-            if (!IsArm)
-            {
-                var nugetMacLibPath = Path.Combine(baseDir, "libvlc", "osx-x64");
-                if (File.Exists(Path.Combine(nugetMacLibPath, "libvlc.dylib")))
-                    return nugetMacLibPath;
-            }
-        }
-
-        var embeddedLibPath = Path.Combine(baseDir, "vlc", "lib");
-        if (Directory.Exists(embeddedLibPath))
-            return embeddedLibPath;
-
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-        {
-            var macOsLibPath = "/Applications/VLC.app/Contents/MacOS/lib";
-            if (Directory.Exists(macOsLibPath))
-                return macOsLibPath;
-        }
-
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-        {
-            var linuxPaths = GetLinuxLibraryPaths();
-            foreach (var path in linuxPaths)
-            {
-                if (HasVlcLibrary(path))
-                    return path;
-            }
-        }
-
-        return null;
-    }
-
-    private static bool HasVlcLibrary(string path)
-    {
-        return File.Exists(Path.Combine(path, "libvlc.dylib")) ||
-               File.Exists(Path.Combine(path, "libvlc.so")) ||
-               File.Exists(Path.Combine(path, "libvlc.so.5")) ||
-               File.Exists(Path.Combine(path, "libvlc.dll"));
-    }
+    #region Logging
 
     private static void Log(string message)
     {
+        Debug.WriteLine($"[VlcInitializer] {message}");
+#if DEBUG
         Console.WriteLine($"[VlcInitializer] {message}");
+#endif
     }
 
     #endregion
+}
+
+/// <summary>
+/// Exception thrown when VLC is not installed or cannot be found on the system.
+/// </summary>
+public class VlcNotFoundException : Exception
+{
+    public VlcNotFoundException(string message) : base(message) { }
+    public VlcNotFoundException(string message, Exception inner) : base(message, inner) { }
+}
+
+/// <summary>
+/// Provides information about the VLC installation status on the system.
+/// </summary>
+public class VlcInstallationStatus
+{
+    /// <summary>
+    /// The current operating system platform (windows, macos, linux).
+    /// </summary>
+    public string Platform { get; set; } = "";
+
+    /// <summary>
+    /// The current CPU architecture (x64, x86, arm64, arm).
+    /// </summary>
+    public string Architecture { get; set; } = "";
+
+    /// <summary>
+    /// Whether VLC libraries were found on the system.
+    /// </summary>
+    public bool IsInstalled { get; set; }
+
+    /// <summary>
+    /// Whether the found VLC libraries are compatible with the current architecture.
+    /// </summary>
+    public bool IsArchitectureCompatible { get; set; }
+
+    /// <summary>
+    /// The path to the VLC libraries, if found.
+    /// </summary>
+    public string? LibraryPath { get; set; }
+
+    /// <summary>
+    /// Any error message encountered during detection.
+    /// </summary>
+    public string? Error { get; set; }
+
+    /// <summary>
+    /// Platform-specific installation instructions.
+    /// </summary>
+    public string InstallationInstructions { get; set; } = "";
+
+    /// <summary>
+    /// Whether VLC is ready to use (installed and architecture compatible).
+    /// </summary>
+    public bool IsReady => IsInstalled && IsArchitectureCompatible;
+
+    public override string ToString()
+    {
+        if (IsReady)
+            return $"VLC is installed and ready at: {LibraryPath}";
+
+        if (IsInstalled && !IsArchitectureCompatible)
+            return $"VLC is installed at {LibraryPath} but is not compatible with {Architecture}";
+
+        return $"VLC is not installed.\n{InstallationInstructions}";
+    }
 }
