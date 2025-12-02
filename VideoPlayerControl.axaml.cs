@@ -5,21 +5,21 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
-using LibVLCSharp.Avalonia;
-using LibVLCSharp.Shared;
+using Avalonia.Media.Imaging;
 using Material.Icons;
 using Material.Icons.Avalonia;
+using System.Runtime.InteropServices;
 
 namespace Avalonia.VlcVideoPlayer;
 
 /// <summary>
 /// A self-contained video player control with playback controls, seek bar, and volume control.
+/// Uses FFmpeg for cross-platform media playback including ARM64 macOS.
 /// </summary>
 public partial class VideoPlayerControl : UserControl
 {
-    private LibVLC? _libVLC;
-    private MediaPlayer? _mediaPlayer;
-    private VideoView? _videoView;
+    private FFmpegMediaPlayer? _mediaPlayer;
+    private Image? _videoImage;
     private Slider? _seekBar;
     private Slider? _volumeSlider;
     private TextBlock? _currentTimeText;
@@ -28,12 +28,12 @@ public partial class VideoPlayerControl : UserControl
     private TextBlock? _playPauseText;
     private MaterialIcon? _volumeIcon;
     private bool _isDraggingSeekBar;
-    private bool _isUpdatingSeekBar;
     private bool _isMuted;
     private int _previousVolume = 100;
     private bool _isInitialized;
     private Border? _controlPanelBorder;
     private Button? _openButton;
+    private WriteableBitmap? _frameBitmap;
 
     /// <summary>
     /// Defines the Volume property.
@@ -180,7 +180,7 @@ public partial class VideoPlayerControl : UserControl
     {
         InitializeComponent();
 
-        _videoView = this.FindControl<VideoView>("VideoView");
+        _videoImage = this.FindControl<Image>("VideoImage");
         _seekBar = this.FindControl<Slider>("SeekBar");
         _volumeSlider = this.FindControl<Slider>("VolumeSlider");
         _currentTimeText = this.FindControl<TextBlock>("CurrentTimeText");
@@ -205,7 +205,7 @@ public partial class VideoPlayerControl : UserControl
             _volumeSlider.ValueChanged += OnVolumeChanged;
         }
 
-        // Initialize VLC when attached to visual tree
+        // Initialize when attached to visual tree
         this.AttachedToVisualTree += OnAttachedToVisualTree;
         this.DetachedFromVisualTree += OnDetachedFromVisualTree;
         
@@ -245,7 +245,7 @@ public partial class VideoPlayerControl : UserControl
 
     private void OnAttachedToVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
     {
-        InitializeVlc();
+        InitializePlayer();
     }
 
     private void OnDetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
@@ -253,25 +253,19 @@ public partial class VideoPlayerControl : UserControl
         Cleanup();
     }
 
-    private void InitializeVlc()
+    private void InitializePlayer()
     {
         if (_isInitialized) return;
 
         try
         {
-            // Ensure VLC is initialized globally
-            if (!VlcInitializer.IsInitialized)
+            // Ensure FFmpeg is initialized globally
+            if (!FFmpegInitializer.IsInitialized)
             {
-                VlcInitializer.Initialize();
+                FFmpegInitializer.Initialize();
             }
 
-            _libVLC = new LibVLC("--no-video-title-show");
-            _mediaPlayer = new MediaPlayer(_libVLC);
-
-            if (_videoView != null)
-            {
-                _videoView.MediaPlayer = _mediaPlayer;
-            }
+            _mediaPlayer = new FFmpegMediaPlayer();
 
             // Subscribe to media player events
             _mediaPlayer.PositionChanged += OnPositionChanged;
@@ -280,6 +274,7 @@ public partial class VideoPlayerControl : UserControl
             _mediaPlayer.Paused += OnPaused;
             _mediaPlayer.Stopped += OnStopped;
             _mediaPlayer.EndReached += OnEndReached;
+            _mediaPlayer.FrameReady += OnFrameReady;
 
             _isInitialized = true;
             
@@ -305,8 +300,54 @@ public partial class VideoPlayerControl : UserControl
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[VideoPlayerControl] Failed to initialize VLC: {ex.Message}");
+            Console.WriteLine($"[VideoPlayerControl] Failed to initialize FFmpeg: {ex.Message}");
         }
+    }
+
+    private void OnFrameReady(object? sender, FrameEventArgs e)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            try
+            {
+                // Create or recreate bitmap if needed
+                if (_frameBitmap == null || 
+                    _frameBitmap.PixelSize.Width != e.Width || 
+                    _frameBitmap.PixelSize.Height != e.Height)
+                {
+                    _frameBitmap = new WriteableBitmap(
+                        new PixelSize(e.Width, e.Height),
+                        new Vector(96, 96),
+                        Avalonia.Platform.PixelFormat.Bgra8888,
+                        Avalonia.Platform.AlphaFormat.Premul);
+                }
+
+                // Copy frame data to bitmap
+                using (var fb = _frameBitmap.Lock())
+                {
+                    var sourceSpan = e.Data.AsSpan();
+                    var destPtr = fb.Address;
+                    
+                    for (int y = 0; y < e.Height; y++)
+                    {
+                        var sourceOffset = y * e.Stride;
+                        var destOffset = y * fb.RowBytes;
+                        var rowLength = Math.Min(e.Width * 4, Math.Min(e.Stride, fb.RowBytes));
+                        
+                        Marshal.Copy(e.Data, sourceOffset, destPtr + destOffset, rowLength);
+                    }
+                }
+
+                if (_videoImage != null)
+                {
+                    _videoImage.Source = _frameBitmap;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[VideoPlayerControl] Frame render error: {ex.Message}");
+            }
+        });
     }
 
     /// <summary>
@@ -315,14 +356,13 @@ public partial class VideoPlayerControl : UserControl
     /// <param name="path">The path to the media file.</param>
     public void Open(string path)
     {
-        if (_libVLC == null || _mediaPlayer == null)
+        if (_mediaPlayer == null)
         {
-            Console.WriteLine("[VideoPlayerControl] VLC not initialized");
+            Console.WriteLine("[VideoPlayerControl] FFmpeg not initialized");
             return;
         }
 
-        var media = new LibVLCSharp.Shared.Media(_libVLC, path, FromType.FromPath);
-        _mediaPlayer.Media = media;
+        _mediaPlayer.Open(path);
 
         if (AutoPlay)
         {
@@ -336,18 +376,13 @@ public partial class VideoPlayerControl : UserControl
     /// <param name="uri">The URI of the media.</param>
     public void OpenUri(Uri uri)
     {
-        if (_libVLC == null || _mediaPlayer == null)
+        if (uri.IsFile)
         {
-            Console.WriteLine("[VideoPlayerControl] VLC not initialized");
-            return;
+            Open(uri.LocalPath);
         }
-
-        var media = new LibVLCSharp.Shared.Media(_libVLC, uri);
-        _mediaPlayer.Media = media;
-
-        if (AutoPlay)
+        else
         {
-            _mediaPlayer.Play();
+            Open(uri.ToString());
         }
     }
 
@@ -400,10 +435,7 @@ public partial class VideoPlayerControl : UserControl
     /// <param name="positionPercent">Position as a percentage (0.0 to 1.0).</param>
     public void Seek(float positionPercent)
     {
-        if (_mediaPlayer != null)
-        {
-            _mediaPlayer.Position = Math.Clamp(positionPercent, 0f, 1f);
-        }
+        _mediaPlayer?.Seek(positionPercent);
     }
 
     /// <summary>
@@ -441,7 +473,7 @@ public partial class VideoPlayerControl : UserControl
         });
     }
 
-    private void OnPositionChanged(object? sender, MediaPlayerPositionChangedEventArgs e)
+    private void OnPositionChanged(object? sender, PositionChangedEventArgs e)
     {
         if (_isDraggingSeekBar || _mediaPlayer == null) return;
 
@@ -449,9 +481,7 @@ public partial class VideoPlayerControl : UserControl
         {
             if (_seekBar != null)
             {
-                _isUpdatingSeekBar = true;
                 _seekBar.Value = e.Position * 100;
-                _isUpdatingSeekBar = false;
             }
 
             if (_currentTimeText != null && _mediaPlayer.Length > 0)
@@ -462,7 +492,7 @@ public partial class VideoPlayerControl : UserControl
         });
     }
 
-    private void OnLengthChanged(object? sender, MediaPlayerLengthChangedEventArgs e)
+    private void OnLengthChanged(object? sender, LengthChangedEventArgs e)
     {
         Dispatcher.UIThread.Post(() =>
         {
@@ -486,7 +516,7 @@ public partial class VideoPlayerControl : UserControl
             _isDraggingSeekBar = false;
             if (_mediaPlayer != null && _seekBar != null)
             {
-                _mediaPlayer.Position = (float)(_seekBar.Value / 100);
+                _mediaPlayer.Seek((float)(_seekBar.Value / 100));
             }
         }
     }
@@ -498,7 +528,7 @@ public partial class VideoPlayerControl : UserControl
             _isDraggingSeekBar = false;
             if (_mediaPlayer != null && _seekBar != null)
             {
-                _mediaPlayer.Position = (float)(_seekBar.Value / 100);
+                _mediaPlayer.Seek((float)(_seekBar.Value / 100));
             }
         }
     }
@@ -528,12 +558,12 @@ public partial class VideoPlayerControl : UserControl
             }
         });
 
-        if (files.Count > 0 && _libVLC != null && _mediaPlayer != null)
+        if (files.Count > 0 && _mediaPlayer != null)
         {
             var file = files[0];
             var path = file.Path.LocalPath;
-            var media = new LibVLCSharp.Shared.Media(_libVLC, path, FromType.FromPath);
-            _mediaPlayer.Play(media);
+            _mediaPlayer.Open(path);
+            _mediaPlayer.Play();
         }
     }
 
@@ -600,11 +630,11 @@ public partial class VideoPlayerControl : UserControl
             _mediaPlayer.Paused -= OnPaused;
             _mediaPlayer.Stopped -= OnStopped;
             _mediaPlayer.EndReached -= OnEndReached;
+            _mediaPlayer.FrameReady -= OnFrameReady;
             _mediaPlayer.Dispose();
             _mediaPlayer = null;
         }
-        _libVLC?.Dispose();
-        _libVLC = null;
+        _frameBitmap = null;
         _isInitialized = false;
     }
 }

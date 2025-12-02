@@ -1,8 +1,8 @@
-# VlcVideoPlayer.Avalonia
+# FFmpegVideoPlayer.Avalonia
 
-A VLC-based video player control for Avalonia UI using **VideoLAN NuGet packages** for VLC binaries.
+An FFmpeg-based video player control for Avalonia UI with **full cross-platform support including ARM64 macOS (Apple Silicon)**.
 
-[![NuGet](https://img.shields.io/nuget/v/VlcVideoPlayer.Avalonia.svg)](https://www.nuget.org/packages/VlcVideoPlayer.Avalonia/)
+[![NuGet](https://img.shields.io/nuget/v/FFmpegVideoPlayer.Avalonia.svg)](https://www.nuget.org/packages/FFmpegVideoPlayer.Avalonia/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ![Video Player Screenshot](https://raw.githubusercontent.com/jojomondag/Avalonia.VlcVideoPlayer/main/screenshot.png)
@@ -10,48 +10,43 @@ A VLC-based video player control for Avalonia UI using **VideoLAN NuGet packages
 ## Features
 
 - 🎬 Full-featured video player control for Avalonia
-- 🖥️ Cross-platform (Windows, macOS, Linux)
-- 📦 **VLC binaries via NuGet** for Windows and macOS Intel
+- 🖥️ **True cross-platform** (Windows, macOS Intel, macOS ARM64, Linux)
+- 🍎 **Native Apple Silicon (M1/M2/M3) support** via FFmpeg
 - 🎨 Clean, modern UI with Material Design icons
-- ⚡ Based on LibVLCSharp for maximum codec support
+- ⚡ Uses FFmpeg.AutoGen for maximum codec support
 - 🎛️ Built-in controls: Play/Pause, Stop, Seek bar, Volume slider, Mute
+- 🔊 OpenAL-based audio playback
 
 ## Installation
 
 ```bash
-dotnet add package VlcVideoPlayer.Avalonia
+dotnet add package FFmpegVideoPlayer.Avalonia
 ```
+
+### FFmpeg Installation
+
+**macOS:** FFmpeg is **automatically installed via Homebrew** if not found! No manual setup needed! 🎉
+
+**Windows & Linux:** FFmpeg must be installed on your system.
+
+| Platform | Installation |
+|----------|-------------|
+| **macOS (Intel & ARM64)** | **Automatic via Homebrew!** ✅ |
+| **Windows** | `winget install ffmpeg` or `choco install ffmpeg` |
+| **Linux (Debian/Ubuntu)** | `sudo apt install ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev` |
+| **Linux (Fedora)** | `sudo dnf install ffmpeg ffmpeg-devel` |
+| **Linux (Arch)** | `sudo pacman -S ffmpeg` |
 
 ### Platform Support
 
-| Platform | VLC Source | Setup Required |
-|----------|------------|----------------|
-| **Windows (x64/x86)** | `VideoLAN.LibVLC.Windows` NuGet | ✅ None - included |
-| **macOS Intel (x64)** | `VideoLAN.LibVLC.Mac` NuGet | ✅ None - included |
-| **macOS ARM64 (Apple Silicon)** | System VLC | `brew install --cask vlc` |
-| **Linux (x64/ARM64)** | System VLC | `sudo apt install vlc libvlc-dev` |
+| Platform | FFmpeg Source | Status |
+|----------|---------------|--------|
+| **macOS Intel (x64)** | Auto-install via Homebrew | ✅ **Zero config!** |
+| **macOS ARM64 (Apple Silicon)** | Auto-install via Homebrew | ✅ **Zero config!** |
+| **Windows (x64/x86/ARM64)** | winget/choco/manual | ✅ Tested |
+| **Linux (x64/ARM64)** | System package | ✅ Tested |
 
-#### macOS ARM64 (Apple Silicon)
-
-No NuGet package exists for macOS ARM64. Install VLC via Homebrew:
-```bash
-brew install --cask vlc
-```
-
-#### Linux
-
-No NuGet package exists for Linux. Install VLC via your package manager:
-
-```bash
-# Debian/Ubuntu
-sudo apt install vlc libvlc-dev
-
-# Fedora
-sudo dnf install vlc vlc-devel
-
-# Arch Linux
-sudo pacman -S vlc
-```
+> **Note:** On macOS, FFmpeg and Homebrew are automatically installed if not present!
 
 ## Quick Start
 
@@ -72,9 +67,11 @@ sudo pacman -S vlc
 </Application>
 ```
 
-### Step 2: Initialize VLC at Startup
+### Step 2: Initialize FFmpeg at Startup
 
-In your `Program.cs` or `App.axaml.cs`, initialize VLC before creating any windows:
+In your `Program.cs` or `App.axaml.cs`, initialize FFmpeg before creating any windows.
+
+**On macOS, FFmpeg is automatically installed via Homebrew if not found!**
 
 ```csharp
 using Avalonia.VlcVideoPlayer;
@@ -83,8 +80,9 @@ public class Program
 {
     public static void Main(string[] args)
     {
-        // Initialize VLC - must be called before creating windows
-        VlcInitializer.Initialize();
+        // Initialize FFmpeg - on macOS, auto-installs via Homebrew if needed!
+        // Set autoInstall: false to disable automatic installation
+        FFmpegInitializer.Initialize();
         
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
@@ -97,15 +95,27 @@ public class Program
 }
 ```
 
+**Optional: Subscribe to status updates during initialization:**
+
+```csharp
+FFmpegInitializer.StatusChanged += (message) => Console.WriteLine(message);
+FFmpegInitializer.Initialize();
+// Output on macOS without FFmpeg:
+// "Initializing FFmpeg for macos-arm64..."
+// "FFmpeg not found. Installing via Homebrew (this may take a few minutes)..."
+// "FFmpeg installed successfully!"
+// "FFmpeg initialized successfully (libavcodec: 61.3.100)"
+```
+
 ### Step 3: Add the VideoPlayerControl to your Window
 
 ```xml
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:vlc="clr-namespace:Avalonia.VlcVideoPlayer;assembly=Avalonia.VlcVideoPlayer"
+        xmlns:ffmpeg="clr-namespace:Avalonia.VlcVideoPlayer;assembly=Avalonia.VlcVideoPlayer"
         Title="My Video Player" Width="800" Height="600">
     
-    <vlc:VideoPlayerControl x:Name="VideoPlayer" />
+    <ffmpeg:VideoPlayerControl x:Name="VideoPlayer" />
     
 </Window>
 ```
@@ -132,12 +142,13 @@ Here's a minimal working example:
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.3.6" />
     <PackageReference Include="Avalonia.Desktop" Version="11.3.6" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.6" />
-    <PackageReference Include="VlcVideoPlayer.Avalonia" Version="1.6.1" />
+    <PackageReference Include="FFmpegVideoPlayer.Avalonia" Version="2.0.0" />
   </ItemGroup>
 </Project>
 ```
@@ -166,7 +177,7 @@ class Program
 {
     public static void Main(string[] args)
     {
-        VlcInitializer.Initialize();
+        FFmpegInitializer.Initialize();
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
 
@@ -183,7 +194,7 @@ For scenarios where you want to play a specific video without the file browser, 
 
 ```xml
 <!-- XAML: Embedded player with custom background -->
-<vlc:VideoPlayerControl 
+<ffmpeg:VideoPlayerControl 
     Source="C:\Videos\intro.mp4"
     AutoPlay="True"
     ShowOpenButton="False"
@@ -208,13 +219,13 @@ The control panel background can be customized to match your app's theme:
 
 ```xml
 <!-- Dark theme -->
-<vlc:VideoPlayerControl ControlPanelBackground="#1a1a1a" />
+<ffmpeg:VideoPlayerControl ControlPanelBackground="#1a1a1a" />
 
 <!-- Match your app's accent color -->
-<vlc:VideoPlayerControl ControlPanelBackground="{DynamicResource SystemAccentColor}" />
+<ffmpeg:VideoPlayerControl ControlPanelBackground="{DynamicResource SystemAccentColor}" />
 
 <!-- Transparent (overlay style) -->
-<vlc:VideoPlayerControl ControlPanelBackground="Transparent" />
+<ffmpeg:VideoPlayerControl ControlPanelBackground="Transparent" />
 ```
 
 ## API Reference
@@ -230,8 +241,8 @@ The control panel background can be customized to match your app's theme:
 | `Source` | `string` | Video source path - set to auto-load video |
 | `ControlPanelBackground` | `IBrush` | Background color of the control panel (default: White) |
 | `IsPlaying` | `bool` | Whether media is currently playing |
-| `Position` | `double` | Current playback position (0.0-1.0) |
-| `Duration` | `TimeSpan` | Total media duration |
+| `Position` | `long` | Current playback position in milliseconds |
+| `Duration` | `long` | Total media duration in milliseconds |
 
 ### VideoPlayerControl Methods
 
@@ -242,8 +253,9 @@ The control panel background can be customized to match your app's theme:
 | `Play()` | Start/resume playback |
 | `Pause()` | Pause playback |
 | `Stop()` | Stop playback |
-| `Seek(double position)` | Seek to position (0.0-1.0) |
+| `Seek(float position)` | Seek to position (0.0-1.0) |
 | `ToggleMute()` | Toggle audio mute |
+| `TogglePlayPause()` | Toggle between play and pause |
 
 ### VideoPlayerControl Events
 
@@ -254,11 +266,68 @@ The control panel background can be customized to match your app's theme:
 | `PlaybackStopped` | Fired when playback stops |
 | `MediaEnded` | Fired when media reaches the end |
 
+### FFmpegInitializer Static Methods
+
+| Method | Description |
+|--------|-------------|
+| `Initialize(string? customPath, bool autoInstall)` | Initialize FFmpeg. On macOS, auto-installs via Homebrew if `autoInstall` is true (default) |
+| `InitializeAsync(string? customPath, bool autoInstall)` | Async version of Initialize |
+| `TryInitialize(string? customPath, out string? error, bool autoInstall)` | Try to initialize without throwing |
+| `CheckInstallation()` | Check FFmpeg installation status |
+| `GetInstallationInstructions()` | Get platform-specific install instructions |
+| `IsHomebrewInstalled()` | Check if Homebrew is installed (macOS only) |
+| `TryInstallFFmpegOnMacOS()` | Manually trigger FFmpeg installation via Homebrew |
+| `TryInstallFFmpegOnWindows()` | Manually trigger FFmpeg installation via winget |
+
+### FFmpegInitializer Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `IsInitialized` | `bool` | Whether FFmpeg has been successfully initialized |
+| `FFmpegPath` | `string?` | Path to the FFmpeg libraries being used |
+| `PlatformInfo` | `string` | Current platform and architecture (e.g., "macos-arm64") |
+| `IsMacOS` | `bool` | Whether running on macOS |
+| `IsWindows` | `bool` | Whether running on Windows |
+| `IsLinux` | `bool` | Whether running on Linux |
+| `IsArm` | `bool` | Whether running on ARM architecture |
+
+### FFmpegInitializer Events
+
+| Event | Description |
+|-------|-------------|
+| `StatusChanged` | Fired with status messages during initialization (useful for showing progress) |
+
+## Migration from VLC Version
+
+If you're migrating from the VLC-based version (v1.x):
+
+1. Update the package: `dotnet add package FFmpegVideoPlayer.Avalonia`
+2. **macOS users: No setup needed!** FFmpeg auto-installs via Homebrew
+3. **Windows/Linux users:** Install FFmpeg (see Installation section)
+4. Change `VlcInitializer.Initialize()` to `FFmpegInitializer.Initialize()` in your Program.cs
+5. The rest of the API remains the same!
+
+## Troubleshooting
+
+### FFmpeg not found
+On macOS, FFmpeg should auto-install. If it fails, run `FFmpegInitializer.GetInstallationInstructions()` for manual steps.
+
+### No audio playback
+Ensure OpenAL is installed:
+- **Windows**: Usually included with graphics drivers
+- **macOS**: Included with the system
+- **Linux**: `sudo apt install libopenal1`
+
+### Video plays but no picture
+This can happen with certain codecs. Ensure you have a complete FFmpeg installation with all codecs enabled.
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
 
 ## Credits
 
-- [LibVLCSharp](https://github.com/videolan/libvlcsharp) - VLC bindings for .NET
+- [FFmpeg](https://ffmpeg.org/) - The leading multimedia framework
+- [FFmpeg.AutoGen](https://github.com/Ruslan-B/FFmpeg.AutoGen) - FFmpeg bindings for .NET
+- [OpenTK](https://opentk.net/) - OpenAL bindings for audio playback
 - [Material.Icons.Avalonia](https://github.com/SKProCH/Material.Icons.Avalonia) - Material Design icons

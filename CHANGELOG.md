@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2025-12-02
+
+### Changed
+- **BREAKING: Migrated from VLC to FFmpeg** - Complete rewrite using FFmpeg.AutoGen
+- Package renamed from `VlcVideoPlayer.Avalonia` to `FFmpegVideoPlayer.Avalonia`
+- Replaced `VlcInitializer` with `FFmpegInitializer`
+- Video rendering now uses Avalonia's WriteableBitmap instead of LibVLCSharp.Avalonia VideoView
+
+### Added
+- **Full macOS ARM64 (Apple Silicon) support** - FFmpeg has native ARM64 binaries via Homebrew
+- **Automatic FFmpeg installation on macOS** - Installs FFmpeg via Homebrew if not found! 🎉
+- **Automatic Homebrew installation on macOS** - Installs Homebrew if needed for FFmpeg
+- `FFmpegMediaPlayer` - New FFmpeg-based media player backend
+- `AudioPlayer` - Cross-platform audio playback using OpenTK/OpenAL
+- `FFmpegNotFoundException` exception with platform-specific installation instructions
+- `FFmpegInstallationStatus` class to check FFmpeg installation
+- `InitializeAsync()` method for async initialization with auto-install
+- `StatusChanged` event for progress updates during initialization/installation
+- `IsHomebrewInstalled()` method to check Homebrew status on macOS
+- `TryInstallFFmpegOnMacOS()` method for manual Homebrew installation trigger
+- `TryInstallFFmpegOnWindows()` method for manual winget installation trigger
+- Multi-threaded video decoding for better performance
+- Support for all FFmpeg-supported codecs and formats
+
+### Removed
+- All VLC/LibVLCSharp dependencies
+- `VideoLAN.LibVLC.Windows` NuGet dependency
+- `VideoLAN.LibVLC.Mac` NuGet dependency
+- `LibVLCSharp` and `LibVLCSharp.Avalonia` dependencies
+
+### Platform Requirements
+- **macOS**: **Zero configuration!** FFmpeg auto-installs via Homebrew ✅
+- **Windows**: Install FFmpeg via `winget install ffmpeg` or `choco install ffmpeg`
+- **Linux**: Install FFmpeg via package manager (`apt install ffmpeg`, `dnf install ffmpeg`, etc.)
+
 ## [1.6.0] - 2025-12-01
 
 ### Changed
