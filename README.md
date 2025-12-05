@@ -5,7 +5,7 @@ An FFmpeg-based video player control for Avalonia UI with **full cross-platform 
 [![NuGet](https://img.shields.io/nuget/v/FFmpegVideoPlayer.Avalonia.svg)](https://www.nuget.org/packages/FFmpegVideoPlayer.Avalonia/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-![Video Player Screenshot](https://raw.githubusercontent.com/jojomondag/Avalonia.VlcVideoPlayer/main/screenshot.png)
+![Video Player Screenshot](https://raw.githubusercontent.com/jojomondag/FFmpegVideoPlayer.Avalonia/main/screenshot.png)
 
 ## Features
 
@@ -23,11 +23,22 @@ An FFmpeg-based video player control for Avalonia UI with **full cross-platform 
 dotnet add package FFmpegVideoPlayer.Avalonia
 ```
 
-### FFmpeg Installation
+### Self-contained FFmpeg (NuGet runtimes)
 
-**macOS:** FFmpeg is **automatically installed via Homebrew** if not found! No manual setup needed! 🎉
+To ship everything inside the NuGet and avoid external installs, place the FFmpeg binaries in the repo before packing:
 
-**Windows & Linux:** FFmpeg must be installed on your system.
+- `runtimes/win-x64/native/*.dll`
+- `runtimes/win-x86/native/*.dll`
+- `runtimes/osx-arm64/native/*.dylib`
+- `runtimes/osx-x64/native/*.dylib`
+- `runtimes/linux-x64/native/*.so`
+- `runtimes/linux-arm64/native/*.so`
+
+They are copied to your build output and packed into the `.nupkg`; at runtime the control first loads from these folders. If nothing is bundled, it falls back to system detection/installation.
+
+### FFmpeg Installation (fallback)
+
+If you prefer system FFmpeg, the control can still auto-detect it:
 
 | Platform | Installation |
 |----------|-------------|
@@ -74,7 +85,7 @@ In your `Program.cs` or `App.axaml.cs`, initialize FFmpeg before creating any wi
 **On macOS, FFmpeg is automatically installed via Homebrew if not found!**
 
 ```csharp
-using Avalonia.VlcVideoPlayer;
+using Avalonia.FFmpegVideoPlayer;
 
 public class Program
 {
@@ -112,7 +123,7 @@ FFmpegInitializer.Initialize();
 ```xml
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:ffmpeg="clr-namespace:Avalonia.VlcVideoPlayer;assembly=Avalonia.VlcVideoPlayer"
+        xmlns:ffmpeg="clr-namespace:Avalonia.FFmpegVideoPlayer;assembly=FFmpegVideoPlayer.Avalonia"
         Title="My Video Player" Width="800" Height="600">
     
     <ffmpeg:VideoPlayerControl x:Name="VideoPlayer" />
@@ -169,7 +180,7 @@ Here's a minimal working example:
 **Program.cs:**
 ```csharp
 using Avalonia;
-using Avalonia.VlcVideoPlayer;
+using Avalonia.FFmpegVideoPlayer;
 
 namespace MyApp;
 
@@ -297,14 +308,14 @@ The control panel background can be customized to match your app's theme:
 |-------|-------------|
 | `StatusChanged` | Fired with status messages during initialization (useful for showing progress) |
 
-## Migration from VLC Version
+## Migration from 1.x Version
 
-If you're migrating from the VLC-based version (v1.x):
+If you're migrating from the legacy 1.x version of this library:
 
 1. Update the package: `dotnet add package FFmpegVideoPlayer.Avalonia`
 2. **macOS users: No setup needed!** FFmpeg auto-installs via Homebrew
 3. **Windows/Linux users:** Install FFmpeg (see Installation section)
-4. Change `VlcInitializer.Initialize()` to `FFmpegInitializer.Initialize()` in your Program.cs
+4. Replace any old initialization call from 1.x with `FFmpegInitializer.Initialize()` in your `Program.cs`
 5. The rest of the API remains the same!
 
 ## Troubleshooting

@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using FFmpeg.AutoGen;
 
-namespace Avalonia.VlcVideoPlayer;
+namespace Avalonia.FFmpegVideoPlayer;
 
 /// <summary>
 /// Handles FFmpeg initialization for cross-platform video playback.
@@ -133,8 +133,14 @@ public static class FFmpegInitializer
             Log($"Initializing FFmpeg for {PlatformInfo}");
             StatusChanged?.Invoke($"Initializing FFmpeg for {PlatformInfo}...");
 
-            // Try to find FFmpeg installation
-            _ffmpegPath = FindFFmpegPath(customPath);
+            // Prefer packaged runtimes if present (runtimes/<rid>/native in the NuGet)
+            _ffmpegPath = FFmpegPathResolver.TryConfigureBundledFFmpeg();
+
+            // Fallback to system/custom discovery
+            if (string.IsNullOrEmpty(_ffmpegPath))
+            {
+                _ffmpegPath = FindFFmpegPath(customPath);
+            }
 
             // If not found on macOS and autoInstall is enabled, try to install via Homebrew
             if (string.IsNullOrEmpty(_ffmpegPath) && IsMacOS && autoInstall)
@@ -152,7 +158,7 @@ public static class FFmpegInitializer
             if (!string.IsNullOrEmpty(_ffmpegPath))
             {
                 Log($"Using FFmpeg from: {_ffmpegPath}");
-                ffmpeg.RootPath = _ffmpegPath;
+                FFmpegPathResolver.ConfigureNativeSearchPath(_ffmpegPath);
             }
 
             // Test FFmpeg by getting version info
@@ -622,7 +628,7 @@ After installation, restart your terminal/IDE.";
 
         foreach (var path in appDirPaths)
         {
-            if (HasFFmpegLibrary(path))
+            if (FFmpegPathResolver.HasFFmpegLibrary(path))
             {
                 Log($"Found FFmpeg in application directory: {path}");
                 return path;
@@ -648,54 +654,8 @@ After installation, restart your terminal/IDE.";
 
     private static string? FindBundledFFmpeg()
     {
-        var baseDir = AppContext.BaseDirectory;
-        
         // NuGet packages typically deploy native libraries to runtimes/{rid}/native/
-        var rid = GetRuntimeIdentifier();
-        var runtimesPath = Path.Combine(baseDir, "runtimes", rid, "native");
-        if (HasFFmpegLibrary(runtimesPath))
-        {
-            Log($"Found bundled FFmpeg at: {runtimesPath}");
-            return runtimesPath;
-        }
-        
-        // Also check common NuGet native paths
-        var nugetPaths = new[]
-        {
-            Path.Combine(baseDir, "runtimes", rid, "native"),
-            Path.Combine(baseDir, rid),
-            Path.Combine(baseDir, "native"),
-            Path.Combine(baseDir, "lib", rid),
-        };
-        
-        foreach (var path in nugetPaths)
-        {
-            if (HasFFmpegLibrary(path))
-            {
-                Log($"Found bundled FFmpeg at: {path}");
-                return path;
-            }
-        }
-        
-        return null;
-    }
-
-    private static string GetRuntimeIdentifier()
-    {
-        var os = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "win" :
-                 RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "osx" :
-                 RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? "linux" : "unknown";
-                 
-        var arch = RuntimeInformation.ProcessArchitecture switch
-        {
-            Architecture.X64 => "x64",
-            Architecture.X86 => "x86",
-            Architecture.Arm64 => "arm64",
-            Architecture.Arm => "arm",
-            _ => "x64"
-        };
-        
-        return $"{os}-{arch}";
+        return FFmpegPathResolver.TryConfigureBundledFFmpeg();
     }
 
     private static string? FindWindowsFFmpeg()
@@ -712,7 +672,7 @@ After installation, restart your terminal/IDE.";
 
         foreach (var path in paths)
         {
-            if (HasFFmpegLibrary(path))
+            if (FFmpegPathResolver.HasFFmpegLibrary(path))
             {
                 Log($"Found FFmpeg at: {path}");
                 return path;
@@ -725,7 +685,7 @@ After installation, restart your terminal/IDE.";
         {
             foreach (var path in envPath.Split(';'))
             {
-                if (HasFFmpegLibrary(path))
+                if (FFmpegPathResolver.HasFFmpegLibrary(path))
                 {
                     Log($"Found FFmpeg in PATH: {path}");
                     return path;
@@ -749,7 +709,7 @@ After installation, restart your terminal/IDE.";
 
         foreach (var path in homebrewPaths)
         {
-            if (HasFFmpegLibrary(path))
+            if (FFmpegPathResolver.HasFFmpegLibrary(path))
             {
                 Log($"Found FFmpeg via Homebrew: {path}");
                 return path;
@@ -763,7 +723,7 @@ After installation, restart your terminal/IDE.";
                     foreach (var versionDir in Directory.GetDirectories(path))
                     {
                         var libPath = Path.Combine(versionDir, "lib");
-                        if (HasFFmpegLibrary(libPath))
+                        if (FFmpegPathResolver.HasFFmpegLibrary(libPath))
                         {
                             Log($"Found FFmpeg via Homebrew Cellar: {libPath}");
                             return libPath;
@@ -775,7 +735,7 @@ After installation, restart your terminal/IDE.";
         }
 
         // MacPorts
-        if (HasFFmpegLibrary("/opt/local/lib"))
+        if (FFmpegPathResolver.HasFFmpegLibrary("/opt/local/lib"))
         {
             Log("Found FFmpeg via MacPorts");
             return "/opt/local/lib";
@@ -816,7 +776,7 @@ After installation, restart your terminal/IDE.";
 
         foreach (var path in systemPaths)
         {
-            if (HasFFmpegLibrary(path))
+            if (FFmpegPathResolver.HasFFmpegLibrary(path))
             {
                 Log($"Found FFmpeg at: {path}");
                 return path;
@@ -829,7 +789,7 @@ After installation, restart your terminal/IDE.";
         {
             foreach (var path in ldPath.Split(':'))
             {
-                if (HasFFmpegLibrary(path))
+                if (FFmpegPathResolver.HasFFmpegLibrary(path))
                 {
                     Log($"Found FFmpeg via LD_LIBRARY_PATH: {path}");
                     return path;
@@ -838,31 +798,6 @@ After installation, restart your terminal/IDE.";
         }
 
         return null;
-    }
-
-    private static bool HasFFmpegLibrary(string path)
-    {
-        if (!Directory.Exists(path))
-            return false;
-
-        // Check for common FFmpeg library files
-        var libraryNames = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-            ? new[] { "avcodec*.dll", "avformat*.dll", "avutil*.dll" }
-            : RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
-                ? new[] { "libavcodec*.dylib", "libavformat*.dylib", "libavutil*.dylib" }
-                : new[] { "libavcodec.so*", "libavformat.so*", "libavutil.so*" };
-
-        foreach (var pattern in libraryNames)
-        {
-            try
-            {
-                if (Directory.GetFiles(path, pattern).Length > 0)
-                    return true;
-            }
-            catch { }
-        }
-
-        return false;
     }
 
     #endregion

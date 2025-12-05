@@ -3,7 +3,7 @@ using System.Collections.Concurrent;
 using System.Threading;
 using OpenTK.Audio.OpenAL;
 
-namespace Avalonia.VlcVideoPlayer;
+namespace Avalonia.FFmpegVideoPlayer;
 
 /// <summary>
 /// Cross-platform audio player using OpenAL.

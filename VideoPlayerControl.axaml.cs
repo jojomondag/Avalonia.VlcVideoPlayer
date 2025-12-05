@@ -10,7 +10,7 @@ using Material.Icons;
 using Material.Icons.Avalonia;
 using System.Runtime.InteropServices;
 
-namespace Avalonia.VlcVideoPlayer;
+namespace Avalonia.FFmpegVideoPlayer;
 
 /// <summary>
 /// A self-contained video player control with playback controls, seek bar, and volume control.

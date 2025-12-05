@@ -8,7 +8,7 @@ using Avalonia.Platform;
 using Avalonia.Threading;
 using FFmpeg.AutoGen;
 
-namespace Avalonia.VlcVideoPlayer;
+namespace Avalonia.FFmpegVideoPlayer;
 
 /// <summary>
 /// FFmpeg-based media player that decodes video and audio.
